@@ -13,6 +13,9 @@
   <img src="https://img.shields.io/badge/license-MIT-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="License" />
 </p>
 
+<p><a href="https://nicholas-pp8.github.io/jarvis/"><b>Setup site: nicholas-pp8.github.io/jarvis</b></a> (guide + .env generator)</p>
+
+
 <p><b>A modular WhatsApp bot with downloaders, AI chat, image tools and group management.</b><br/>Pairing-code login, no QR. Runs on small free hosts (about 150 MB RAM).</p>
 
 <img src="assets/demo.gif" width="460" alt="Example chat (illustrative)" />
