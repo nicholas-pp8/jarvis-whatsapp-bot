@@ -81,7 +81,7 @@ export async function handleCommand(ctx, parsed) {
   const now = Date.now();
   if (config.limits.cooldownMs && !ctx.isOwner) {
     const prev = lastUse.get(ctx.sender) || 0;
-    if (now - prev < config.limits.cooldownMs) return;
+    if (now - prev < config.limits.cooldownMs) return ctx.reply(`Wait ${Math.ceil((config.limits.cooldownMs-(now-prev))/1000)} seconds before another command.`);
     lastUse.set(ctx.sender, now);
     if (lastUse.size > 5000) lastUse.clear();
   }

@@ -1,3 +1,10 @@
+# v1.5.2
+
+- Fix HEAD latency endpoint and return useful network failure text.
+- Allow sudo private commands in actual inbound PN/LID DMs without confusing destination and sender.
+- Report central cooldown rather than silently dropping commands.
+- Clarify HTML command expects a public URL, not inline markup.
+
 # v1.5.1
 
 - Fix sudo add/remove in owner self-chat: accept explicit international numbers with or without +, retain real single-mention support.
