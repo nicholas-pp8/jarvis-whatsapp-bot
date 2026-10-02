@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0
+
+- Fourteen validated utility commands: safe files/archives, private passwords, reviewed persistent self-reminders, system, web metadata/text, ASCII/PDF, timezone/date tools.
+- Three-second utility cooldown, content type checks and bounded memory operations.
+- Optional JSON-only group storage skips native SQLite probes on constrained hosts.
+
 ## 1.3.0
 
 - Owner self-chat health alerts and daily checks, with conservative cooldowns.

@@ -1,3 +1,5 @@
+import {Reminders} from '../utilities/reminders.js';
+import cron from 'node-cron';
 import fs from 'node:fs';import path from 'node:path';
 import config from '../config/config.js';import {Updater,healthy} from './update.js';
 import {prune} from '../recover/store.js';
@@ -5,6 +7,8 @@ import {Usage} from './usage.js';import {Health} from './health.js';
 import {cleanupStaleJobs} from '../utils/fileManager.js';
 export const usage=new Usage(path.join(config.paths.data,'usage.json'));
 export const updater=new Updater(config.root,config.paths.data);
+export const reminders=new Reminders(path.join(config.paths.data,'reminders.json'),notify);
+let reminderTask=null;
 const health=new Health();let socket=null;let online=false;let pendingOffline=false;let running=false;let started=false;let timer=null;let healthTimer=null;
 const file=path.join(config.paths.data,'ops.json');let state={};try{state=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}
 function save(){try{fs.mkdirSync(config.paths.data,{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(state));fs.renameSync(file+'.tmp',file);}catch{}}
@@ -37,5 +41,5 @@ export async function tick(){if(running)return;running=true;try{
  const weekday=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',weekday:'long'}).format(new Date());
  if(online&&weekday==='Sunday'&&hour>=Math.min(23,Math.max(0,Number(process.env.OPS_REPORT_HOUR??10)))&&state.weekly!==today&&await notify(report('Weekly usage',7))){state.weekly=today;save();}
  }finally{running=false;}}
-export function start(){if(started)return;started=true;timer=setInterval(()=>tick().catch(()=>{}),60000);timer.unref?.();}
-export function stop(){clearInterval(timer);clearTimeout(healthTimer);started=false;usage.flush();}
+export function start(){if(started)return;started=true;reminderTask=cron.schedule('* * * * *',()=>reminders.tick().catch(()=>{}),{timezone:'Asia/Kolkata'});timer=setInterval(()=>tick().catch(()=>{}),60000);timer.unref?.();}
+export function stop(){reminderTask?.stop();reminderTask?.destroy();clearInterval(timer);clearTimeout(healthTimer);started=false;usage.flush();}

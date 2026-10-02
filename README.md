@@ -9,7 +9,7 @@
 <p>
   <img src="https://img.shields.io/badge/Node.js-20%2B-3DDCFF?style=for-the-badge&logo=node.js&logoColor=white&labelColor=0b1c2c" alt="Node" />
   <img src="https://img.shields.io/badge/Baileys-7.0-3DDCFF?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=0b1c2c" alt="Baileys" />
-  <img src="https://img.shields.io/badge/commands-51-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
+  <img src="https://img.shields.io/badge/commands-65-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
   <img src="https://img.shields.io/badge/license-MIT-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="License" />
 </p>
 
@@ -43,7 +43,7 @@
 
 ## Commands
 
-All 51 commands. The default prefix is `/` and can be changed in `.env`.
+All 65 commands. The default prefix is `/` and can be changed in `.env`.
 
 ### General (4)
 
@@ -229,3 +229,16 @@ MIT
 - Start via `npm start` (`scripts/runner.js`). A process supervisor must restart Jarvis after exits; this does not restart other bots. Fatal exceptions exit for supervisor recovery. Existing WhatsApp reconnect logic stays in place.
 - `/update` runs only from the linked owner's self-chat. It checks `nicholas-pp8/jarvis-whatsapp-bot` main, shows a higher semantic version and changelog, then requires `/update confirm <full commit SHA>` within ten minutes. Periodic reminders check hourly. Same-version commits do not trigger an update.
 - Updates pin the displayed commit, check file hashes, reject symlink paths, syntax-check changed JS and stage source before replacing it. Dependencies/runtime changes require a manual tested deployment. `.env`, auth, data, downloads, binaries, dependency lockfile and stable runner are never overwritten. A failed boot or health timeout restores previous changed files once on restart. The supervisor must launch the stable runner, and any embedding host launcher must preserve subsequently installed source rather than replay older code.
+
+## Utilities (v1.4.0)
+
+- `/filetype` identifies uploaded/replied files from content, not filename. Media downloads and image inputs are checked before processing. Executables, unknown binary types, script-like text and nested ZIPs are rejected. Utility files are limited to 10 MiB. ZIP output/extraction stays in memory, leaving no temporary copies.
+- `/zip` compresses one replied safe file. `/unzip` accepts at most 20 entries and 20 MiB expanded content; rejects unsafe paths, symlinks, excessive expansion and unsupported contents. Archives are validated before any files are sent.
+- `/password [8-64] [all|alnum|letters|digits]` is owner self-chat only. Uses cryptographic random generation. Generated values are sent to WhatsApp but not written to bot logs, usage counts or caches. WhatsApp/chat history still retains the message.
+- `/remind add YYYY-MM-DDTHH:mm Asia/Kolkata <text>` shows the exact self-chat message and time for review. Confirm with the displayed code within ten minutes. `/remind list` and `/remind cancel <id>` manage persistent reminders. One-shot reminders only, max 20 jobs, max 90 days ahead, max 1,000 characters. Sends on the next minute tick when online. Offline jobs wait. A transport error or interrupted send is marked uncertain, not retried automatically, to prevent duplicates. Check list and cancel/recreate if needed. Only the linked owner's actual self-chat can create reminders.
+- `/system` (`/stats`) is private owner-only, with CPU, RAM, filesystem usage, OS/Node and uptime. No hostnames, network addresses, serials, user names or paths. Filesystem usage is not provider quota usage.
+- `/linkpreview <URL>` shows title, description, site and image URL. `/html <URL>` extracts page text/metadata without running scripts. Only public HTTP/HTTPS on standard ports, DNS-pinned addresses, validated redirects, 10-second socket timeout and 1 MiB HTML cap. No cookies, credentials or browser login sent.
+- `/ascii <text>` supports up to 60 English ASCII characters with capped output. Only the Small font is needed on lightweight hosts. `/pdf <text>` makes a basic PDF from up to 10,000 bytes of English text. Unicode fonts are not included.
+- `/time [IANA timezone]`, `/date [IANA timezone]`, `/timestamp`, `/countdown YYYY-MM-DDTHH:mm [IANA timezone]`. Default Asia/Kolkata. Invalid dates/zones and past countdown targets are rejected.
+- All utilities have a three-second per-user cooldown, including owner requests. File/text/response limits apply.
+- Set `GROUP_STORAGE=json` on small hosts with broken optional SQLite binaries. This skips native probes and prevents their crash dumps; existing JSON group settings stay intact.

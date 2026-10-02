@@ -1,4 +1,5 @@
 // Image and sticker helpers: media lookup, WebP stickers with WhatsApp metadata, conversions.
+import {identify} from '../utilities/files.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -63,7 +64,8 @@ function debugMiss(msg, direct, ctxInfo, quoted) {
 }
 
 export async function downloadMedia(sock, media) {
-  return downloadMediaMessage(media.message, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage });
+  const buf=await downloadMediaMessage(media.message, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage });
+  const t=await identify(buf);if(!t.mime.startsWith('image/')&&!t.mime.startsWith('video/'))throw new Error('Unsupported image/video content');return buf;
 }
 
 function runFfmpeg(args) {

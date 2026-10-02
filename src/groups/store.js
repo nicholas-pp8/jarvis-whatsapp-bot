@@ -128,7 +128,7 @@ class JsonStore {
 export async function initStore() {
   if (impl) return impl;
   fs.mkdirSync(config.paths.data, { recursive: true });
-  const tries = [
+  const tries = process.env.GROUP_STORAGE==='json'?[]:[
     ['better-sqlite3', async () => new (await import('better-sqlite3')).default(dbFile)],
     ['node:sqlite', async () => new (await import('node:sqlite')).DatabaseSync(dbFile)],
   ];

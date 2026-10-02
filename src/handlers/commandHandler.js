@@ -64,6 +64,7 @@ export function parseCommand(text) {
 }
 
 const lastUse = new Map();
+const utilityUse=new Map();
 
 export async function handleCommand(ctx, parsed) {
   const cmd = registry.get(parsed.name);
@@ -82,6 +83,7 @@ export async function handleCommand(ctx, parsed) {
     if (lastUse.size > 5000) lastUse.clear();
   }
 
+  if(cmd.category==='Utilities'){const key=ctx.sender;const prev=utilityUse.get(key)||0;if(now-prev<3000)return ctx.reply('Wait 3 seconds before another utility command.');utilityUse.set(key,now);if(utilityUse.size>5000)utilityUse.clear();}
   ctx.args = parsed.args;
   if ((cmd.minArgs || 0) > ctx.args.length) {
     return ctx.reply(`⚠️ Missing input.\n\nUsage: ${config.prefix}${cmd.usage}`);
@@ -94,6 +96,6 @@ export async function handleCommand(ctx, parsed) {
   } catch (err) {
     usage.record(cmd.name,{error:true});
     logger.error(`Command ${cmd.name} crashed:`, err);
-    await ctx.reply('⚠️ Something went wrong while running that command. Please try again.').catch(() => {});
+    await ctx.reply(cmd.category==='Utilities'?`Utility stopped: ${String(err.message).slice(0,250)}`:'⚠️ Something went wrong while running that command. Please try again.').catch(() => {});
   }
 }

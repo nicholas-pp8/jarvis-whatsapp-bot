@@ -1,0 +1,5 @@
+import dayjs from 'dayjs';import utc from 'dayjs/plugin/utc.js';import timezone from 'dayjs/plugin/timezone.js';import customParseFormat from 'dayjs/plugin/customParseFormat.js';dayjs.extend(utc);dayjs.extend(timezone);dayjs.extend(customParseFormat);
+export function zone(z='Asia/Kolkata'){try{new Intl.DateTimeFormat('en',{timeZone:z}).format();return z;}catch{throw new Error('Invalid IANA timezone, e.g. Asia/Kolkata');}}
+export function dateTime(z){return dayjs().tz(zone(z)).format('YYYY-MM-DD HH:mm:ss Z');}
+export function deadline(text,z='Asia/Kolkata'){zone(z);if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)||!dayjs(text,'YYYY-MM-DDTHH:mm',true).isValid())throw new Error('Use YYYY-MM-DDTHH:mm and an optional IANA timezone');const d=dayjs.tz(text,z);if(d.format('YYYY-MM-DDTHH:mm')!==text)throw new Error('Time falls in a timezone clock change');return d.valueOf();}
+export function countdown(text,z){const ms=deadline(text,z)-Date.now();if(ms<=0)throw new Error('Time is already past');return `${Math.floor(ms/86400000)}d ${Math.floor(ms/3600000)%24}h ${Math.floor(ms/60000)%60}m`;} 

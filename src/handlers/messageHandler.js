@@ -17,8 +17,10 @@ export function trackOutgoing(sock) {
   try { attachGroups(sock); } catch (err) { logger.error('Group module failed to attach:', err); }
   const original = sock.sendMessage.bind(sock);
   sock.sendMessage = async (...args) => {
+    const noCache=!!args[2]?.jarvisNoCache;
+    if(noCache){args[2]={...args[2]};delete args[2].jarvisNoCache;}
     const res = await original(...args);
-    cacheMessage(res);
+    if(!noCache)cacheMessage(res);
     if (res?.key?.id) {
       botSent.add(res.key.id);
       if (botSent.size > MAX_SENT) botSent.delete(botSent.values().next().value);
@@ -64,6 +66,7 @@ function senderOf(msg, kind) {
 export async function handleMessage(sock, msg) {
   try {
     if (!msg?.message || !msg.key?.id) return;
+    if(msg.key.fromMe&&botSent.has(msg.key.id))return;
     cacheMessage(msg);
     observe(sock, msg).catch(() => {});
     const kind = classify(msg);
