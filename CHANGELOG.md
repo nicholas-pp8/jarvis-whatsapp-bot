@@ -1,3 +1,8 @@
+# v1.5.3
+
+- Restore image backend with integrity-checked locked Sharp prebuilt packages only and runtime smoke verification.
+- Cache bounded document/audio metadata and resolve wrapped or omitted PDF/file quotes in same chat.
+
 # v1.5.2
 
 - Fix HEAD latency endpoint and return useful network failure text.

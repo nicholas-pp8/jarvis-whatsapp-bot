@@ -256,3 +256,5 @@ MIT
 Permission modules may specify `requiredLevel: user|admin|sudo|owner`. The current owner policy permits full sudo access for `owner` commands except the three membership-management commands. `admin` means actual WhatsApp group admin or primary owner, not sudo alone. A global owner-only gate permits configured sudo users too.
 
 Every startup imports and validates all command definitions, permissions, arguments and alias formats, and runs pure game sanity checks. Log reports passed/failed counts and names failed commands; an invalid registry fails startup rather than going online half-loaded. This is offline validation, not a claim that every command works against WhatsApp/media providers. No group actions, messages, downloads, updates or bandwidth tests run during boot.
+
+Image host repair installs only the two locked Linux-x64 Sharp/libvips prebuilt packages and runs a PNG-to-WebP runtime check, without SQLite or build scripts. Document/audio quote cache stores metadata for up to 150 recent media messages, not original file bytes. Utility quote fallback checks the same chat.

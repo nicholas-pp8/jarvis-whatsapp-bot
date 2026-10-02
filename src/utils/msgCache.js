@@ -34,7 +34,7 @@ export function cacheMessage(msg) {
     const id = msg?.key?.id;
     const m = unwrap(msg?.message);
     if (!id || !m) return;
-    if (!(m.imageMessage || m.videoMessage || m.stickerMessage || (m.documentMessage && /^image\//.test(m.documentMessage.mimetype || '')))) return;
+    if (!(m.imageMessage || m.videoMessage || m.stickerMessage || m.documentMessage || m.audioMessage)) return;
     cache.set(id, { key: msg.key, message: m });
     if (cache.size > MAX) cache.delete(cache.keys().next().value);
     scheduleSave();
