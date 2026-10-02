@@ -9,7 +9,7 @@
 <p>
   <img src="https://img.shields.io/badge/Node.js-20%2B-3DDCFF?style=for-the-badge&logo=node.js&logoColor=white&labelColor=0b1c2c" alt="Node" />
   <img src="https://img.shields.io/badge/Baileys-7.0-3DDCFF?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=0b1c2c" alt="Baileys" />
-  <img src="https://img.shields.io/badge/commands-46-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
+  <img src="https://img.shields.io/badge/commands-48-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
   <img src="https://img.shields.io/badge/license-MIT-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="License" />
 </p>
 
@@ -31,6 +31,7 @@
 
 * **Downloaders**: YouTube audio (`/play`) and video (`/video`) by name or link, Pinterest images and videos by link or search term.
 * **AI**: `/ask` talks to Gemini, Groq or OpenRouter, whichever keys you set. It tries them in order and falls back on errors.
+* **Text to speech**: `/tts` supports 23 languages, with male/female voices where available using Microsoft Edge voices, with Google Translate as fallback. No API key. Defaults: 500 characters and 5 requests per minute for non-owner users (the owner is exempt). When voice-note conversion fails, it sends plain audio.
 * **Image tools**: stickers with your own pack name, sticker to image, resize, compress, convert. Works as a caption or as a reply to media.
 * **Group management**: welcome and goodbye messages, rules, warnings with history, anti-link, anti-spam, anti-flood, blocked words, mute, scheduled messages, stats, invite link tools, add/remove/promote/demote.
 * **Recover**: deleted messages, deleted and normal statuses, view-once photos, videos and voice notes, profile pictures. Sent to your own chat. See the Recover section below.
@@ -42,7 +43,7 @@
 
 ## Commands
 
-All 46 commands. The default prefix is `/` and can be changed in `.env`.
+All 48 commands. The default prefix is `/` and can be changed in `.env`.
 
 ### General (4)
 
@@ -71,11 +72,13 @@ All 46 commands. The default prefix is `/` and can be changed in `.env`.
 | `/compress 60 (quality 10-95, optional)` | Make an image smaller in file size | `/shrink` |
 | `/convert png (png, jpg or webp)` | Convert an image to png, jpg or webp | `/toformat` |
 
-### AI (1)
+### AI (3)
 
 | Command | What it does | Aliases |
 | --- | --- | --- |
 | `/ask <question>` | Ask an AI anything | `/ai` |
+| `/tts [language] [male, female or voice] <text>` | Text to audio. Also works as a reply. Examples: `/tts hi Namaste dosto`, `/tts en male Good morning` | `/speak`, `/say` |
+| `/ttsvoices [language]` | List languages and voices | `/voices` |
 
 ### Bot (1)
 
@@ -96,7 +99,7 @@ Owner only, except `/getpp`. Recovered items are sent to your own chat ("message
 | `/vvn` | Recover a view-once voice note | `/vvvoice` |
 | `/getpp [reply, @mention or number]` | Get the profile picture of a user | `/pp`, `/dp` |
 
-**What to know:** only items that arrive after the bot is online and the feature is on can be recovered. Nothing before that, and nothing while the bot is offline. Items are kept for 25 hours (statuses) or 48 hours (messages and view-once) with an 80 MB cap, then deleted. Group chats are off by default. WhatsApp decides what a linked device receives, so view-once recovery can fail if WhatsApp only sends a placeholder. It stays on your own host and is never uploaded anywhere.
+**What to know:** only items that arrive after the bot is online and the feature is on can be recovered. Nothing before that, and nothing while the bot is offline. Items are kept for 25 hours (statuses) or 48 hours (messages and view-once) with an 80 MB cap, then deleted. All four recover switches are ON by default. You can turn each off; choices persist across restarts. WhatsApp decides what a linked device receives, so view-once recovery can fail if WhatsApp only sends a placeholder. It stays on your own host and is never uploaded anywhere.
 
 ### Group management (26)
 
@@ -192,6 +195,7 @@ src/
   commands/     one file per command (auto loaded)
   groups/       group module: storage, permissions, moderation, scheduler, commands
   recover/      deleted message, status and view-once cache
+  tts/          speech providers, voices and limits
   downloaders/  YouTube and Pinterest
   ai/           AI providers
   connection/   Baileys connection and pairing

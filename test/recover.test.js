@@ -36,8 +36,9 @@ test('deleted private message is restored to the owner chat', async () => {
   assert.equal(s.sent.length, 1, 'no double restore');
 });
 
-test('group delete ignored unless groups enabled; antidelete off ignores', async () => {
+test('group delete ignored when groups disabled; antidelete off ignores', async () => {
   const s = mkSock();
+  store.setSetting('groups', false);
   const g = '120363000000000001@g.us';
   await rec.observe(s, txt('G1', g, 'hello', { participant: '933333333333@s.whatsapp.net' }));
   await rec.observe(s, revoke('G1', g));
@@ -106,7 +107,7 @@ test('view-once detection through wrappers', () => {
 
 test('getpp works, hides gracefully', async () => {
   const s = mkSock();
-  global.fetch = async () => ({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });
+  global.fetch = async () => { const buf = Buffer.alloc(240); buf[0]=0xff; buf[1]=0xd8; return { ok: true, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) }; };
   await getpp.run(ctxFor(s, { args: ['919876543210'] }));
   assert.ok(s.sent.at(-1).c.image);
   await getpp.run(ctxFor(s, { args: ['999876543210'] }));
@@ -156,4 +157,10 @@ test('setprefix accepts symbols, digits, letters, emoji; persists; escape hatch'
   assert.deepEqual(parseCommand('/setprefix reset'), { name: 'setprefix', args: ['reset'] }, 'escape hatch');
   await setprefix.run(c(['reset']));
   assert.equal(config.prefix, '/');
+});
+
+test('recover switches persist across init', () => {
+ for(const key of ['antidelete','groups','status','vo'])store.setSetting(key,true);
+ store.init();
+ assert.deepEqual(store.getSettings(),{antidelete:true,groups:true,status:true,vo:true});
 });

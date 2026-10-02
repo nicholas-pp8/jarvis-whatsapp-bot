@@ -15,7 +15,7 @@ const dir = () => path.join(config.paths.data, 'recover');
 const indexFile = () => path.join(dir(), 'index.json');
 const settingsFile = () => path.join(dir(), 'settings.json');
 
-const DEFAULTS = { antidelete: true, groups: false, status: true, vo: true };
+const DEFAULTS = { antidelete: true, groups: true, status: true, vo: true };
 let settings = { ...DEFAULTS };
 const index = new Map();
 let deletedLog = [];
