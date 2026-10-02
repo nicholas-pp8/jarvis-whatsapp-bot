@@ -7,7 +7,7 @@ import {Usage} from './usage.js';import {Health} from './health.js';
 import {cleanupStaleJobs} from '../utils/fileManager.js';
 export const usage=new Usage(path.join(config.paths.data,'usage.json'));
 export const updater=new Updater(config.root,config.paths.data);
-export const reminders=new Reminders(path.join(config.paths.data,'reminders.json'),notify);
+export const reminders=new Reminders(path.join(config.paths.data,'reminders.json'),async(text,to)=>{if(!to)return notify(text);if(!online)return false;await socket.sendMessage(to,{text:'Jarvis\n'+text});return true;});
 let reminderTask=null;
 const health=new Health();let socket=null;let online=false;let pendingOffline=false;let running=false;let started=false;let timer=null;let healthTimer=null;
 const file=path.join(config.paths.data,'ops.json');let state={};try{state=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}

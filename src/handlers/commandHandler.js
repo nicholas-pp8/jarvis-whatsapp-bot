@@ -1,3 +1,4 @@
+import {permitted,fullAccess} from '../permissions/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -29,6 +30,7 @@ class CommandRegistry {
   }
 }
 
+export const commandLoadFailures=[];
 export const registry = new CommandRegistry();
 
 /** Loads every command module in src/commands automatically (skips files starting with "_"). */
@@ -39,6 +41,7 @@ export async function loadCommands() {
       const mod = await import(pathToFileURL(path.join(dir, f)).href);
       registry.register(mod.default);
     } catch (err) {
+      commandLoadFailures.push(f.replace(/\.js$/,''));
       logger.error(`Failed to load command file ${f}:`, err);
     }
   }
@@ -72,8 +75,8 @@ export async function handleCommand(ctx, parsed) {
     logger.warn(`Unknown command: ${parsed.name.slice(0, 30)}`);
     return ctx.reply(`❓ Unknown command. Type ${config.prefix}menu to see what I can do.`);
   }
-  if (config.ownerOnly && !ctx.isOwner) return;
-  if (cmd.ownerOnly && !ctx.isOwner) return ctx.reply('🔒 Only the bot owner can use this command.');
+  if (config.ownerOnly && !fullAccess(ctx)) return;
+  if(!await permitted(ctx,cmd))return ctx.reply('This command requires '+(cmd.ownerOnly?'owner':cmd.requiredLevel||'user')+' permissions.');
 
   const now = Date.now();
   if (config.limits.cooldownMs && !ctx.isOwner) {
@@ -83,7 +86,7 @@ export async function handleCommand(ctx, parsed) {
     if (lastUse.size > 5000) lastUse.clear();
   }
 
-  if(cmd.category==='Utilities'){const key=ctx.sender;const prev=utilityUse.get(key)||0;if(now-prev<3000)return ctx.reply('Wait 3 seconds before another utility command.');utilityUse.set(key,now);if(utilityUse.size>5000)utilityUse.clear();}
+  if(['Utilities','Games','Permissions'].includes(cmd.category)){const key=ctx.sender;const prev=utilityUse.get(key)||0;if(now-prev<3000)return ctx.reply('Wait 3 seconds before another utility/game command.');utilityUse.set(key,now);if(utilityUse.size>5000)utilityUse.clear();}
   ctx.args = parsed.args;
   if ((cmd.minArgs || 0) > ctx.args.length) {
     return ctx.reply(`⚠️ Missing input.\n\nUsage: ${config.prefix}${cmd.usage}`);
@@ -96,6 +99,6 @@ export async function handleCommand(ctx, parsed) {
   } catch (err) {
     usage.record(cmd.name,{error:true});
     logger.error(`Command ${cmd.name} crashed:`, err);
-    await ctx.reply(cmd.category==='Utilities'?`Utility stopped: ${String(err.message).slice(0,250)}`:'⚠️ Something went wrong while running that command. Please try again.').catch(() => {});
+    await ctx.reply(['Utilities','Games','Permissions'].includes(cmd.category)?`Command stopped: ${String(err.message).slice(0,250)}`:'⚠️ Something went wrong while running that command. Please try again.').catch(() => {});
   }
 }

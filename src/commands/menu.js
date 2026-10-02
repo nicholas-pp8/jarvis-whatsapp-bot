@@ -1,3 +1,4 @@
+import {fullAccess} from '../permissions/index.js';
 import {usage} from '../ops/index.js';
 import config from '../config/config.js';
 import { snapshot, istFull } from '../utils/botstats.js';
@@ -46,7 +47,7 @@ export default {
   usage: 'menu',
   async run(ctx) {
     const p = config.prefix;
-    const all = ctx.commands.list().filter((c) => !c.hidden && (!c.ownerOnly||ctx.isOwner));
+    const all = ctx.commands.list().filter((c) => !c.hidden && (!c.ownerOnly||ctx.isOwner||(fullAccess(ctx)&&!['addsudo','delsudo','listsudo'].includes(c.name))));
     const rank = (c) => (ORDER.indexOf(c.name) === -1 ? 99 : ORDER.indexOf(c.name));
     const known = new Set(SECTIONS.map((s) => s.cat));
     const sections = [...SECTIONS];

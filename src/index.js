@@ -4,7 +4,8 @@ import config from './config/config.js';
 import logger from './utils/logger.js';
 import { ensureDirs, cleanupStaleJobs } from './utils/fileManager.js';
 import { initDatabase } from './database/database.js';
-import { loadCommands } from './handlers/commandHandler.js';
+import {bootSelfTest} from './ops/selftest.js';
+import { loadCommands,registry,commandLoadFailures } from './handlers/commandHandler.js';
 import { startWhatsApp, shutdown } from './connection/whatsapp.js';
 
 async function main() {
@@ -12,6 +13,7 @@ async function main() {
   await ensureDirs();
   await initDatabase();
   await loadCommands();
+  const checks=bootSelfTest(registry,commandLoadFailures);if(checks.failed.length)throw new Error('Startup self-test failed: '+checks.failed.join(', '));
   await cleanupStaleJobs(0); // anything left in temp from a previous run is abandoned
   setInterval(() => cleanupStaleJobs(), 10 * 60 * 1000).unref();
   onError(recordError);startOps();

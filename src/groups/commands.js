@@ -1,3 +1,4 @@
+import {isSudo} from '../permissions/index.js';
 // Group management commands. Each one is exported by name and wrapped by a thin file in src/commands/.
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
@@ -47,7 +48,7 @@ function def(name, o) {
       if (!meta) return ctx.reply('⚠️ Could not read this group right now. Please try again.');
       const level = levelOf(ctx.sock, meta, ctx.msg, ctx.isOwner);
       const need = o.level || LEVEL.member;
-      if (level < need) {
+      if (level < need && !(need >= LEVEL.botAdmin && isSudo(ctx) && level >= LEVEL.groupAdmin)) {
         return ctx.reply(`🔒 ${need >= LEVEL.owner ? 'Only the bot owner' : need >= LEVEL.botAdmin ? 'Only bot admins' : 'Only group admins'} can use this command.`);
       }
       const me = botMember(ctx.sock, meta);

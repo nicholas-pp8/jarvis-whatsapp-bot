@@ -242,3 +242,17 @@ MIT
 - `/time [IANA timezone]`, `/date [IANA timezone]`, `/timestamp`, `/countdown YYYY-MM-DDTHH:mm [IANA timezone]`. Default Asia/Kolkata. Invalid dates/zones and past countdown targets are rejected.
 - All utilities have a three-second per-user cooldown, including owner requests. File/text/response limits apply.
 - Set `GROUP_STORAGE=json` on small hosts with broken optional SQLite binaries. This skips native probes and prevents their crash dumps; existing JSON group settings stay intact.
+
+## v1.5 games, sudo and latency
+
+- `/ttt` plays tic-tac-toe against an unbeatable bot. Use `/ttt 1` through `9`, or cancel.
+- `/jumble`, `/wordgame` and `/quiz math|words` have isolated per-user/chat sessions. Word-making uses a small curated English dictionary. `/quiz leaderboard` uses pseudonymous player labels.
+- `/8ball`, `/coinflip`, `/dice`, `/joke`, `/quote`, `/fact`, `/choose a | b` are offline fun commands. `/poll question | a | b` creates a single-choice group poll and requires group admin or primary owner.
+- `/speedtest quick` measures host HTTPS latency to Cloudflare with a HEAD-only request and a 5-second timeout. It includes DNS/TLS time, is not phone speed, and does not measure Mbps. Full bandwidth tests are not installed.
+- Primary owner uses `/addsudo @user`, `/delsudo @user`, `/listsudo`. `/checksudo` reports the caller's status. Phone-number WhatsApp JIDs only; one mention per change. Duplicate users are rejected. Membership persists in `data/db.json`; the last 100 add/remove audit records retain hashed identities and timestamps.
+- This owner's chosen policy grants sudo access to otherwise owner-only commands, except add/remove/list sudo management. A sudo cannot grant another sudo. Group commands retain group-admin and bot-admin checks. Removing sudo affects the next command; already-running actions cannot be recalled.
+- Sudo password/update commands require the caller's own private DM. Reminders require review and confirmation, deliver to the caller's private chat, and keep each user's list/cancel scope separate. Legacy reminders remain owner-only. No automatic retry after an ambiguous reminder send.
+
+Permission modules may specify `requiredLevel: user|admin|sudo|owner`. The current owner policy permits full sudo access for `owner` commands except the three membership-management commands. `admin` means actual WhatsApp group admin or primary owner, not sudo alone. A global owner-only gate permits configured sudo users too.
+
+Every startup imports and validates all command definitions, permissions, arguments and alias formats, and runs pure game sanity checks. Log reports passed/failed counts and names failed commands; an invalid registry fails startup rather than going online half-loaded. This is offline validation, not a claim that every command works against WhatsApp/media providers. No group actions, messages, downloads, updates or bandwidth tests run during boot.

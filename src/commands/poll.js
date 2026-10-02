@@ -1,0 +1,2 @@
+import {options} from '../games/engine.js';
+export default {name:'poll',category:'Games',description:'Create a simple group poll',usage:'poll question | option1 | option2',minArgs:1,requiredLevel:'admin',async run(ctx){if(!ctx.isGroup)throw new Error('Polls require a group');const parts=ctx.args.join(' ').split('|').map(x=>x.trim());const name=parts.shift();if(!name||name.length>200)throw new Error('Question must be 1-200 characters');const values=options(parts.join('|'));await ctx.sock.sendMessage(ctx.jid,{poll:{name,values,selectableCount:1}},{quoted:ctx.msg});}};

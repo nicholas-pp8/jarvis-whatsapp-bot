@@ -1,3 +1,11 @@
+# v1.5.0
+
+- Add 12 offline fun/game commands with bounded sessions and pseudonymous leaderboard.
+- Add persistent sudo membership, owner-only membership management, audit log, and permission middleware.
+- Isolate sudo private reminders; allow password/update from operator private DMs.
+- Add quick host HTTPS latency only; no Ookla or full bandwidth test.
+- Preserve group admin checks and byte-exact launcher regression validation.
+
 # Changelog
 
 ## 1.4.0

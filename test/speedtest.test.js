@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {EventEmitter} from 'node:events';import {latencyProbe} from '../src/commands/speedtest.js';
+test('latency probe is HEAD-only with timeout and no bandwidth payload',async()=>{const ms=await latencyProbe((url,opts,cb)=>{assert.equal(opts.method,'HEAD');assert.equal(opts.timeout,5000);const r=new EventEmitter();r.end=()=>cb({statusCode:200,resume(){}});return r;});assert.ok(ms>=0);});
