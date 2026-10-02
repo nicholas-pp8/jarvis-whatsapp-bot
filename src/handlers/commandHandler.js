@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
+import {usage} from '../ops/index.js';
 import { recordCommand } from '../database/database.js';
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'commands');
@@ -87,9 +88,11 @@ export async function handleCommand(ctx, parsed) {
   }
   logger.info(`Command received: ${config.prefix}${cmd.name}`);
   recordCommand(cmd.name);
+  usage.record(cmd.name,{owner:ctx.isOwner});
   try {
     await cmd.run(ctx);
   } catch (err) {
+    usage.record(cmd.name,{error:true});
     logger.error(`Command ${cmd.name} crashed:`, err);
     await ctx.reply('⚠️ Something went wrong while running that command. Please try again.').catch(() => {});
   }

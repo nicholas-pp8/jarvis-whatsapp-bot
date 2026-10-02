@@ -5,6 +5,7 @@ import config from '../config/config.js';
 import logger from './logger.js';
 
 const JOB_PREFIX = 'job-';
+const activeJobs=new Set();
 
 export async function ensureDirs() {
   for (const p of Object.values(config.paths)) await fs.mkdir(p, { recursive: true });
@@ -32,6 +33,7 @@ export function isInside(parent, target) {
 export async function createJobDir() {
   const dir = path.join(config.paths.temp, `${JOB_PREFIX}${Date.now()}-${crypto.randomBytes(4).toString('hex')}`);
   await fs.mkdir(dir, { recursive: true });
+  activeJobs.add(path.resolve(dir));
   return dir;
 }
 
@@ -44,6 +46,7 @@ export async function removeJobDir(dir) {
   }
   try {
     await fs.rm(dir, { recursive: true, force: true });
+    activeJobs.delete(path.resolve(dir));
   } catch (err) {
     logger.warn('Temp cleanup failed:', err);
   }
@@ -57,7 +60,8 @@ export async function cleanupStaleJobs(maxAgeMs = config.limits.tempMaxAgeMs) {
     for (const e of entries) {
       if (!e.isDirectory() || !e.name.startsWith(JOB_PREFIX)) continue;
       const full = path.join(config.paths.temp, e.name);
-      const st = await fs.stat(full).catch(() => null);
+      if(activeJobs.has(path.resolve(full)))continue;
+      const st = await fs.lstat(full).catch(() => null);
       if (st && Date.now() - st.mtimeMs > maxAgeMs) {
         await removeJobDir(full);
         removed++;
@@ -85,7 +89,7 @@ export async function dirSize(dir) {
     for (const e of await fs.readdir(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) total += await dirSize(p);
-      else total += (await fs.stat(p).catch(() => ({ size: 0 }))).size;
+      else if(!e.isSymbolicLink()) total += (await fs.stat(p).catch(() => ({ size: 0 }))).size;
     }
   } catch {
     /* ignore */

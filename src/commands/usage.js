@@ -1,0 +1,2 @@
+import {report,usage} from '../ops/index.js';import config from '../config/config.js';
+export default {name:'usage',category:'WhatsApp',ownerOnly:true,description:'Private usage insights',usage:'usage',async run(ctx){if(ctx.isGroup){await ctx.reply('Usage insights are available only in a private chat.');return;}const s=usage.summary();const suggestions=s.owner.filter(([n,c])=>n.length>6&&c>=10).slice(0,2).map(([n])=>`${config.prefix}${n} is used often. A short alias could help (suggestion only).`).join('\n');await ctx.reply(report()+(suggestions?'\n'+suggestions:''));}};

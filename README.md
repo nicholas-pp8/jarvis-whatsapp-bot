@@ -9,7 +9,7 @@
 <p>
   <img src="https://img.shields.io/badge/Node.js-20%2B-3DDCFF?style=for-the-badge&logo=node.js&logoColor=white&labelColor=0b1c2c" alt="Node" />
   <img src="https://img.shields.io/badge/Baileys-7.0-3DDCFF?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=0b1c2c" alt="Baileys" />
-  <img src="https://img.shields.io/badge/commands-48-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
+  <img src="https://img.shields.io/badge/commands-51-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
   <img src="https://img.shields.io/badge/license-MIT-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="License" />
 </p>
 
@@ -43,7 +43,7 @@
 
 ## Commands
 
-All 48 commands. The default prefix is `/` and can be changed in `.env`.
+All 51 commands. The default prefix is `/` and can be changed in `.env`.
 
 ### General (4)
 
@@ -62,7 +62,7 @@ All 48 commands. The default prefix is `/` and can be changed in `.env`.
 | `/video <name or link>` | Download a YouTube video (MP4) | `/ytvideo`, `/ytmp4`, `/yt` |
 | `/pinterest <name or link>` | Find a Pinterest pin by name, or download one from a link | `/pin` |
 
-### Image tools (5)
+### Image tools (6)
 
 | Command | What it does | Aliases |
 | --- | --- | --- |
@@ -70,6 +70,7 @@ All 48 commands. The default prefix is `/` and can be changed in `.env`.
 | `/toimg (reply to a sticker)` | Turn a sticker into an image | `/toimage`, `/unsticker` |
 | `/resize 800 (send or reply to an image)` | Resize an image to a width in pixels | - |
 | `/compress 60 (quality 10-95, optional)` | Make an image smaller in file size | `/shrink` |
+| `/qr <text or URL>` | Generate a 1024px PNG QR code | - |
 | `/convert png (png, jpg or webp)` | Convert an image to png, jpg or webp | `/toformat` |
 
 ### AI (3)
@@ -80,10 +81,12 @@ All 48 commands. The default prefix is `/` and can be changed in `.env`.
 | `/tts [language] [male, female or voice] <text>` | Text to audio. Also works as a reply. Examples: `/tts hi Namaste dosto`, `/tts en male Good morning` | `/speak`, `/say` |
 | `/ttsvoices [language]` | List languages and voices | `/voices` |
 
-### Bot (1)
+### Bot (3)
 
 | Command | What it does | Aliases |
 | --- | --- | --- |
+| `/update` | Owner self-chat update review and confirmation | - |
+| `/usage` | Private owner usage insights | - |
 | `/status` | Show bot status: uptime, memory, usage and more | - |
 
 ### Recover (6)
@@ -215,3 +218,14 @@ npm test
 ## License
 
 MIT
+
+## Health, usage, QR and updates (v1.3.0)
+
+- `/qr <text or URL>` creates a 1024px PNG QR. Accepts up to 2,000 UTF-8 bytes, including vCard and Wi-Fi text. It uses memory, leaving no QR temp files.
+- `/usage` is owner-only in private chats. Only command names, counts, error counts and hour totals are stored, not arguments, message text, phone numbers or chat IDs. Retention is 35 days. Owner favorites appear in private owner menus. Alias hints are suggestions, never automatic command changes.
+- Self-chat reports default to 10 AM Asia/Kolkata, with weekly usage on Sundays. `OPS_REPORT_HOUR` changes the hour (0-23). If offline, reports wait for reconnect; WhatsApp cannot deliver an offline alert while disconnected.
+- Health checks run once a minute. Sustained disconnects, five errors in five minutes, and repeated 90% RAM pressure produce conservative alerts with one-hour cooldowns. RAM readings describe the shared container, not only Jarvis. Disk alerts require explicit `HOST_DISK_LIMIT_MB`; they measure Jarvis's own files, not the provider's complete shared quota. No arbitrary source edits or process kills are attempted.
+- Every ten minutes, expired recover cache entries and abandoned temp jobs are pruned. Existing recover limits remain 80 MiB total, 20 MiB/file, 48-hour message/view-once and 25-hour status expiry. Active jobs and auth/config/settings are preserved. Cleanup reduces waste but cannot guarantee unlimited free space.
+- Start via `npm start` (`scripts/runner.js`). A process supervisor must restart Jarvis after exits; this does not restart other bots. Fatal exceptions exit for supervisor recovery. Existing WhatsApp reconnect logic stays in place.
+- `/update` runs only from the linked owner's self-chat. It checks `nicholas-pp8/jarvis-whatsapp-bot` main, shows a higher semantic version and changelog, then requires `/update confirm <full commit SHA>` within ten minutes. Periodic reminders check hourly. Same-version commits do not trigger an update.
+- Updates pin the displayed commit, check file hashes, reject symlink paths, syntax-check changed JS and stage source before replacing it. Dependencies/runtime changes require a manual tested deployment. `.env`, auth, data, downloads, binaries, dependency lockfile and stable runner are never overwritten. A failed boot or health timeout restores previous changed files once on restart. The supervisor must launch the stable runner, and any embedding host launcher must preserve subsequently installed source rather than replay older code.

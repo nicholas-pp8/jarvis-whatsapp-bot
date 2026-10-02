@@ -52,7 +52,7 @@ export function setSetting(k, v) {
   return true;
 }
 
-const filePath = (e) => (e.file ? path.join(dir(), 'f', e.file) : null);
+const filePath = (e) => (e.file && /^[A-Za-z0-9-]+\.bin$/.test(e.file) ? path.join(dir(), 'f', e.file) : null);
 function dropFile(e) { const p = filePath(e); if (p) fs.rm(p, { force: true }, () => {}); }
 
 export function add(entry, buf) {
@@ -111,6 +111,7 @@ export function prune(now = Date.now()) {
       index.delete(e.id);
     }
   }
+  save();
 }
 
 export const stats = () => ({ entries: index.size, bytes: totalBytes(), statuses: list((e) => e.kind === 'status').length, viewOnce: list((e) => e.kind === 'vo').length, deleted: deletedLog.length });

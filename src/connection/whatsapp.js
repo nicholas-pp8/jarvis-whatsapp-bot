@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import readline from 'node:readline';
 import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import pino from 'pino';
+import {connection,stop as stopOps} from '../ops/index.js';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { sleep } from '../utils/helpers.js';
@@ -104,7 +105,7 @@ export async function startWhatsApp() {
   let pairingRequested = false;
   s.ev.on('connection.update', async (update) => {
     try {
-      const { connection, lastDisconnect, qr } = update;
+      const { connection: connectionState, lastDisconnect, qr } = update;
 
       // A QR event means the socket is ready and not logged in: ask for a pairing code instead.
       if (qr && !s.authState.creds.registered && !pairingRequested) {
@@ -113,15 +114,17 @@ export async function startWhatsApp() {
         await requestPairing(s);
       }
 
-      if (connection === 'connecting') logger.info('Connecting to WhatsApp…');
+      if (connectionState === 'connecting') logger.info('Connecting to WhatsApp…');
 
-      if (connection === 'open') {
+      if (connectionState === 'open') {
+        connection(s,true);
         reconnectAttempts = 0;
         pairingAttempts = 0;
         logger.info('WhatsApp connection established');
       }
 
-      if (connection === 'close') {
+      if (connectionState === 'close') {
+        connection(s,false);
         const code = lastDisconnect?.error?.output?.statusCode;
         if (stopping) return;
         if (code === DisconnectReason.loggedOut) {
@@ -177,6 +180,7 @@ export async function startWhatsApp() {
 export async function shutdown(exitCode = 0) {
   if (stopping && exitCode === 0) return;
   stopping = true;
+  stopOps();
   try {
     sock?.end(undefined);
   } catch {

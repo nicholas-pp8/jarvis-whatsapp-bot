@@ -1,3 +1,4 @@
+import {usage} from '../ops/index.js';
 import config from '../config/config.js';
 import { snapshot, istFull } from '../utils/botstats.js';
 import { formatBytes, formatDuration } from '../utils/helpers.js';
@@ -45,7 +46,7 @@ export default {
   usage: 'menu',
   async run(ctx) {
     const p = config.prefix;
-    const all = ctx.commands.list().filter((c) => !c.hidden);
+    const all = ctx.commands.list().filter((c) => !c.hidden && (!c.ownerOnly||ctx.isOwner));
     const rank = (c) => (ORDER.indexOf(c.name) === -1 ? 99 : ORDER.indexOf(c.name));
     const known = new Set(SECTIONS.map((s) => s.cat));
     const sections = [...SECTIONS];
@@ -56,6 +57,7 @@ export default {
       }
     }
     const lines = [`*${sc(config.botName)} ${sc('menu')}*`, sc('whatsapp assistant'), LINE, ''];
+    if(ctx.isOwner&&!ctx.isGroup){const favorites=usage.summary().owner.filter(([n])=>!['menu','help','status'].includes(n)).slice(0,4);if(favorites.length)lines.push(sc('favorites'),favorites.map(([n])=>p+sc(n)).join('  '),'');}
     try {
       const s = await snapshot(ctx.commands);
       const top = s.usage.slice(0, 4).map(([n, c]) => `${p}${sc(n)} ${c}`).join('  ') || '-';

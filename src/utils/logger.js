@@ -28,11 +28,13 @@ function write(level, args) {
   (level === 'error' || level === 'warn' ? console.error : console.log)(line);
 }
 
+const errorListeners=new Set();
+export const onError=fn=>errorListeners.add(fn);
 const logger = {
   debug: (...a) => write('debug', a),
   info: (...a) => write('info', a),
   warn: (...a) => write('warn', a),
-  error: (...a) => write('error', a),
+  error: (...a) => {write('error', a);for(const fn of errorListeners)try{fn();}catch{}},
   redact,
 };
 

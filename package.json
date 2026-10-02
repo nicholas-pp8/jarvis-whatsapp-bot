@@ -1,11 +1,11 @@
 {
   "name": "jarvis-whatsapp-bot",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Jarvis: a modular multifunctional WhatsApp bot (Baileys) with downloaders, AI, image tools and group management",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node scripts/runner.js",
     "dev": "node --watch src/index.js",
     "setup:ytdlp": "node scripts/install-ytdlp.js",
     "postinstall": "node scripts/install-ytdlp.js",
@@ -21,12 +21,13 @@
     "bottleneck": "^2.19.5",
     "dotenv": "^18.0.5",
     "ffmpeg-static": "^5.3.0",
+    "msedge-tts": "^2.0.8",
     "node-cron": "^4.6.0",
     "pino": "^10.3.1",
+    "qrcode": "^1.5.4",
     "sharp": "^0.35.5",
     "validator": "^13.15.35",
-    "yt-search": "^2.13.1",
-    "msedge-tts": "^2.0.8"
+    "yt-search": "^2.13.1"
   },
   "optionalDependencies": {
     "better-sqlite3": "^13.0.3"

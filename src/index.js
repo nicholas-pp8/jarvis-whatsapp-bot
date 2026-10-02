@@ -1,3 +1,5 @@
+import {start as startOps,stop as stopOps,recordError} from './ops/index.js';
+import {onError} from './utils/logger.js';
 import config from './config/config.js';
 import logger from './utils/logger.js';
 import { ensureDirs, cleanupStaleJobs } from './utils/fileManager.js';
@@ -12,14 +14,15 @@ async function main() {
   await loadCommands();
   await cleanupStaleJobs(0); // anything left in temp from a previous run is abandoned
   setInterval(() => cleanupStaleJobs(), 10 * 60 * 1000).unref();
+  onError(recordError);startOps();
   await startWhatsApp();
 }
 
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
-// Keep running if something unexpected slips through.
+// Fatal runtime failures restart only Jarvis via its host supervisor.
 process.on('unhandledRejection', (err) => logger.error('Unhandled rejection:', err));
-process.on('uncaughtException', (err) => logger.error('Uncaught exception:', err));
+process.on('uncaughtException', (err) => {logger.error('Uncaught exception:', err);stopOps();shutdown(1);});
 
 main().catch((err) => {
   logger.error('Fatal startup error:', err);
