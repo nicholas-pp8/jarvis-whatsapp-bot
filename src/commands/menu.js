@@ -8,6 +8,7 @@ const SECTIONS = [
   { cat: 'Image', title: 'IMAGE' },
   { cat: 'AI', title: 'AI' },
   { cat: 'Group', title: 'GROUP' },
+  { cat: 'Recover', title: 'RECOVER' },
   { cat: 'WhatsApp', title: 'BOT' },
 ];
 const SHORT = {
@@ -27,6 +28,7 @@ const SHORT = {
   groupinfo: 'group details', grouplink: 'invite link', revoke: 'reset link', add: 'add by number', remove: 'remove member', promote: 'make admin', demote: 'remove admin',
   tagall: 'mention all', warn: 'warn member', warnings: 'view warnings', resetwarn: 'clear warnings', antilink: 'block links', antispam: 'block repeats', antiflood: 'slow floods',
   welcome: 'welcome msg', goodbye: 'goodbye msg', blockword: 'word filter', rules: 'group rules', setrules: 'set rules', groupstats: 'activity stats', groupconfig: 'group settings',
+  statusdl: 'save statuses', antidelete: 'deleted msgs', deleted: 'deleted list', vv: 'view-once photo', vvn: 'view-once voice', getpp: 'profile picture',
   announce: 'announcement', schedule: 'daily message', mute: 'admins only chat', unmute: 'open chat', botadmin: 'bot admins',
 };
 const ORDER = ['menu', 'help', 'ping', 'play', 'video', 'pinterest', 'sticker', 'toimg', 'resize', 'compress', 'convert', 'ask', 'status'];

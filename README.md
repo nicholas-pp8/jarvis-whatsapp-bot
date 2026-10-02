@@ -9,7 +9,7 @@
 <p>
   <img src="https://img.shields.io/badge/Node.js-20%2B-3DDCFF?style=for-the-badge&logo=node.js&logoColor=white&labelColor=0b1c2c" alt="Node" />
   <img src="https://img.shields.io/badge/Baileys-7.0-3DDCFF?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=0b1c2c" alt="Baileys" />
-  <img src="https://img.shields.io/badge/commands-39-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
+  <img src="https://img.shields.io/badge/commands-46-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
   <img src="https://img.shields.io/badge/license-MIT-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="License" />
 </p>
 
@@ -33,6 +33,7 @@
 * **AI**: `/ask` talks to Gemini, Groq or OpenRouter, whichever keys you set. It tries them in order and falls back on errors.
 * **Image tools**: stickers with your own pack name, sticker to image, resize, compress, convert. Works as a caption or as a reply to media.
 * **Group management**: welcome and goodbye messages, rules, warnings with history, anti-link, anti-spam, anti-flood, blocked words, mute, scheduled messages, stats, invite link tools, add/remove/promote/demote.
+* **Recover**: deleted messages, deleted and normal statuses, view-once photos, videos and voice notes, profile pictures. Sent to your own chat. See the Recover section below.
 * **Permission levels**: bot owner > bot admin > WhatsApp group admin > member.
 * **Safe by default**: every automatic group feature is off until a group admin turns it on. Admins are never auto moderated.
 * **Crash safe**: errors are caught per message and per group. One bad message never stops the bot. The connection reconnects by itself.
@@ -41,15 +42,16 @@
 
 ## Commands
 
-All 39 commands. The default prefix is `/` and can be changed in `.env`.
+All 46 commands. The default prefix is `/` and can be changed in `.env`.
 
-### General (3)
+### General (4)
 
 | Command | What it does | Aliases |
 | --- | --- | --- |
 | `/menu` | Show all commands | `/start`, `/commands` |
 | `/help [command]` | Explain how to use the bot or one command | `/h` |
 | `/ping` | Check that the bot is alive and how fast it replies | - |
+| `/setprefix <prefix>` | Change the command prefix: any symbol, number, letter or emoji (1 to 3 characters). Saved across restarts. `/setprefix reset` always works | `/prefix` |
 
 ### Downloaders (3)
 
@@ -80,6 +82,21 @@ All 39 commands. The default prefix is `/` and can be changed in `.env`.
 | Command | What it does | Aliases |
 | --- | --- | --- |
 | `/status` | Show bot status: uptime, memory, usage and more | - |
+
+### Recover (6)
+
+Owner only, except `/getpp`. Recovered items are sent to your own chat ("message yourself"). If you type one of these commands inside someone else's chat, the bot deletes your command message and answers in your own chat.
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/statusdl [number, name or all]` | List saved statuses and download them | `/sdl`, `/savestatus` |
+| `/antidelete [on, off, groups on, status on, vo on]` | Turn recovery of deleted messages, statuses and view-once on or off | `/antidel` |
+| `/deleted [number]` | List the deleted items the bot caught, or send one again | `/recover` |
+| `/vv` | Recover a view-once photo or video (reply to it, or the latest saved) | `/viewonce` |
+| `/vvn` | Recover a view-once voice note | `/vvvoice` |
+| `/getpp [reply, @mention or number]` | Get the profile picture of a user | `/pp`, `/dp` |
+
+**What to know:** only items that arrive after the bot is online and the feature is on can be recovered. Nothing before that, and nothing while the bot is offline. Items are kept for 25 hours (statuses) or 48 hours (messages and view-once) with an 80 MB cap, then deleted. Group chats are off by default. WhatsApp decides what a linked device receives, so view-once recovery can fail if WhatsApp only sends a placeholder. It stays on your own host and is never uploaded anywhere.
 
 ### Group management (26)
 
@@ -174,6 +191,7 @@ Settings are stored per group in `data/groups.sqlite` when SQLite works on your 
 src/
   commands/     one file per command (auto loaded)
   groups/       group module: storage, permissions, moderation, scheduler, commands
+  recover/      deleted message, status and view-once cache
   downloaders/  YouTube and Pinterest
   ai/           AI providers
   connection/   Baileys connection and pairing

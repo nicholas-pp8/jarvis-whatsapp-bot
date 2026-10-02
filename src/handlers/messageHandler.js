@@ -4,6 +4,7 @@ import { jidToNumber } from '../utils/helpers.js';
 import { handleCommand, parseCommand, registry } from './commandHandler.js';
 import { handleStatus } from './statusHandler.js';
 import { cacheMessage } from '../utils/msgCache.js';
+import { observe } from '../recover/index.js';
 import { attachGroups, groupsReady } from '../groups/index.js';
 import { moderate } from '../groups/moderation.js';
 
@@ -64,6 +65,7 @@ export async function handleMessage(sock, msg) {
   try {
     if (!msg?.message || !msg.key?.id) return;
     cacheMessage(msg);
+    observe(sock, msg).catch(() => {});
     const kind = classify(msg);
     if (kind === 'status') return handleStatus(sock, msg);
     if (kind === 'ignore') return;

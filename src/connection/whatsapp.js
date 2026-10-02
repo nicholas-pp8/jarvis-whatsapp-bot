@@ -6,6 +6,8 @@ import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { sleep } from '../utils/helpers.js';
 import { handleMessage, trackOutgoing } from '../handlers/messageHandler.js';
+import { getCached } from '../utils/msgCache.js';
+import { observe, onRevokeKey } from '../recover/index.js';
 
 const MAX_PAIRING_ATTEMPTS = 3;
 const MAX_MESSAGE_AGE_S = 120;
@@ -85,7 +87,8 @@ export async function startWhatsApp() {
     markOnlineOnConnect: false,
     syncFullHistory: false,
     generateHighQualityLinkPreview: false,
-    getMessage: async () => undefined,
+    // Lets WhatsApp re-send messages we could not decrypt the first time (needed for full media delivery).
+    getMessage: async (key) => getCached(key?.id)?.message,
   });
   sock = s;
   trackOutgoing(s);
@@ -145,8 +148,22 @@ export async function startWhatsApp() {
     }
   });
 
+  // Deletes can also arrive as an update with a revoke stub; handle both paths (duplicates are ignored).
+  s.ev.on('messages.update', async (updates) => {
+    for (const u of updates || []) {
+      try {
+        const stub = u?.update?.messageStubType;
+        if ((stub === 1 || stub === 'REVOKE') && u.key?.id) await onRevokeKey(s, u.key);
+      } catch (err) { logger.warn('Delete update failed:', err.message); }
+    }
+  });
+
   s.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
+    // Offline/history deliveries are only remembered for recovery, never run as commands.
+    if (type !== 'notify') {
+      for (const msg of messages || []) observe(s, msg).catch(() => {});
+      return;
+    }
     for (const msg of messages) {
       const ts = Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? 0);
       if (ts && Date.now() / 1000 - ts > MAX_MESSAGE_AGE_S) continue; // ignore old/offline backlog

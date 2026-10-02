@@ -1,0 +1,28 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import config from '../config/config.js';
+
+const graphemes = (t) => (typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(t)].length : [...t].length);
+
+export default {
+  name: 'setprefix',
+  aliases: ['prefix'],
+  category: 'General',
+  description: 'Change the command prefix (any symbol, number, letter or emoji)',
+  usage: 'setprefix <new prefix> (or "reset")',
+  ownerOnly: true,
+  async run(ctx) {
+    const raw = ctx.args.join(' ').trim();
+    if (!raw) return ctx.reply(`Current prefix: ${config.prefix}\n\nChange it: ${config.prefix}setprefix <new prefix>\nExamples: ${config.prefix}setprefix !   ${config.prefix}setprefix .   ${config.prefix}setprefix 🤖\nReset: ${config.prefix}setprefix reset\nIf you forget it, /setprefix reset always works.`);
+    const next = /^(reset|default)$/i.test(raw) ? (process.env.PREFIX || '/').trim() || '/' : raw;
+    if (/\s/.test(next)) return ctx.reply('The prefix cannot contain spaces.');
+    if (graphemes(next) > 3 || next.length > 12) return ctx.reply('Use a short prefix: 1 to 3 characters.');
+    config.prefix = next;
+    try {
+      fs.mkdirSync(config.paths.data, { recursive: true });
+      fs.writeFileSync(path.join(config.paths.data, 'prefix.json'), JSON.stringify({ prefix: next }));
+    } catch { /* still active until restart */ }
+    const warn = /^[A-Za-z0-9]+$/.test(next) ? '\nNote: a letter or number prefix can match normal chat. Commands will look like ' + next + 'menu.' : '';
+    await ctx.reply(`Prefix changed to ${next}\nTry: ${next}menu${warn}`);
+  },
+};

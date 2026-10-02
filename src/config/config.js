@@ -70,4 +70,10 @@ const config = {
   },
 };
 
+// A prefix saved with /setprefix wins over PREFIX in .env, so it survives restarts.
+try {
+  const saved = JSON.parse(fs.readFileSync(path.join(config.paths.data, 'prefix.json'), 'utf8')).prefix;
+  if (typeof saved === 'string' && saved && saved.length <= 12) config.prefix = saved;
+} catch { /* no saved prefix */ }
+
 export default config;

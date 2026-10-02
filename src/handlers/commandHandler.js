@@ -49,8 +49,12 @@ const foldSmallCaps = (t) => [...t].map((ch) => { const i = SMALL_CAPS.indexOf(c
 
 /** Splits "/cmd arg1 arg2" into { name, args } or returns null when it is not a command. */
 export function parseCommand(text) {
-  if (!text || !text.startsWith(config.prefix)) return null;
-  const body = text.slice(config.prefix.length).trim();
+  if (!text) return null;
+  let used = config.prefix;
+  // Escape hatch: "/setprefix ..." always works, so a bad prefix can never lock the owner out.
+  if (!text.startsWith(used) && /^\/setprefix(\s|$)/i.test(text)) used = '/';
+  if (!text.startsWith(used)) return null;
+  const body = text.slice(used.length).trim();
   if (!body) return null;
   const [first, ...rest] = body.split(/\s+/);
   const name = foldSmallCaps(first.toLowerCase());
