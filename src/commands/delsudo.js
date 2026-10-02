@@ -1,2 +1,2 @@
-import {changeSudo} from '../permissions/index.js';
-export default {name:'delsudo',category:'Permissions',ownerOnly:true,description:'Remove a mentioned sudo user',usage:'delsudo @user',async run(ctx){const m=ctx.msg.message;const mentions=m?.extendedTextMessage?.contextInfo?.mentionedJid||m?.imageMessage?.contextInfo?.mentionedJid||[];if(mentions.length!==1)throw new Error('Mention exactly one phone-number user');await changeSudo(mentions[0],false,ctx.sender);await ctx.reply('Sudo user removed. New commands now use regular permissions.');}};
+import {changeSudo,sudoTarget} from '../permissions/index.js';
+export default {name:'delsudo',category:'Permissions',ownerOnly:true,description:'Remove a mentioned sudo user',usage:'delsudo +international_number | @user',async run(ctx){await changeSudo(sudoTarget(ctx),false,ctx.sender);await ctx.reply('Sudo user removed. New commands now use regular permissions.');}};

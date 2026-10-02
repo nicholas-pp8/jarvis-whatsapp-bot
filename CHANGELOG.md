@@ -1,3 +1,8 @@
+# v1.5.1
+
+- Fix sudo add/remove in owner self-chat: accept explicit international numbers with or without +, retain real single-mention support.
+- No reply-target inference; reject malformed/multiple inputs.
+
 # v1.5.0
 
 - Add 12 offline fun/game commands with bounded sessions and pseudonymous leaderboard.
