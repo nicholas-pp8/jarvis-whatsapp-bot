@@ -1,0 +1,92 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import config from '../config/config.js';
+import logger from '../utils/logger.js';
+import { recordCommand } from '../database/database.js';
+
+const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'commands');
+
+class CommandRegistry {
+  constructor() {
+    this.commands = new Map();
+    this.aliases = new Map();
+  }
+  register(cmd) {
+    if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('Invalid command module');
+    cmd.category ||= 'Other';
+    cmd.usage ||= cmd.name;
+    cmd.description ||= '';
+    this.commands.set(cmd.name, cmd);
+    for (const a of cmd.aliases || []) this.aliases.set(a, cmd.name);
+  }
+  get(name) {
+    return this.commands.get(name) || this.commands.get(this.aliases.get(name));
+  }
+  list() {
+    return [...this.commands.values()];
+  }
+}
+
+export const registry = new CommandRegistry();
+
+/** Loads every command module in src/commands automatically (skips files starting with "_"). */
+export async function loadCommands() {
+  for (const f of (await fs.readdir(dir)).sort()) {
+    if (!f.endsWith('.js') || f.startsWith('_')) continue;
+    try {
+      const mod = await import(pathToFileURL(path.join(dir, f)).href);
+      registry.register(mod.default);
+    } catch (err) {
+      logger.error(`Failed to load command file ${f}:`, err);
+    }
+  }
+  logger.info(`Loaded ${registry.list().length} commands`);
+}
+
+const SMALL_CAPS = 'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ';
+const foldSmallCaps = (t) => [...t].map((ch) => { const i = SMALL_CAPS.indexOf(ch); return i === -1 ? ch : String.fromCharCode(97 + i); }).join('');
+
+/** Splits "/cmd arg1 arg2" into { name, args } or returns null when it is not a command. */
+export function parseCommand(text) {
+  if (!text || !text.startsWith(config.prefix)) return null;
+  const body = text.slice(config.prefix.length).trim();
+  if (!body) return null;
+  const [first, ...rest] = body.split(/\s+/);
+  const name = foldSmallCaps(first.toLowerCase());
+  if (!/^[a-z0-9_]{1,30}$/.test(name)) return null;
+  return { name, args: rest };
+}
+
+const lastUse = new Map();
+
+export async function handleCommand(ctx, parsed) {
+  const cmd = registry.get(parsed.name);
+  if (!cmd) {
+    logger.warn(`Unknown command: ${parsed.name.slice(0, 30)}`);
+    return ctx.reply(`❓ Unknown command. Type ${config.prefix}menu to see what I can do.`);
+  }
+  if (config.ownerOnly && !ctx.isOwner) return;
+  if (cmd.ownerOnly && !ctx.isOwner) return ctx.reply('🔒 Only the bot owner can use this command.');
+
+  const now = Date.now();
+  if (config.limits.cooldownMs && !ctx.isOwner) {
+    const prev = lastUse.get(ctx.sender) || 0;
+    if (now - prev < config.limits.cooldownMs) return;
+    lastUse.set(ctx.sender, now);
+    if (lastUse.size > 5000) lastUse.clear();
+  }
+
+  ctx.args = parsed.args;
+  if ((cmd.minArgs || 0) > ctx.args.length) {
+    return ctx.reply(`⚠️ Missing input.\n\nUsage: ${config.prefix}${cmd.usage}`);
+  }
+  logger.info(`Command received: ${config.prefix}${cmd.name}`);
+  recordCommand(cmd.name);
+  try {
+    await cmd.run(ctx);
+  } catch (err) {
+    logger.error(`Command ${cmd.name} crashed:`, err);
+    await ctx.reply('⚠️ Something went wrong while running that command. Please try again.').catch(() => {});
+  }
+}
