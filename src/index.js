@@ -1,3 +1,4 @@
+import {validateLocales} from './i18n/validate.js';
 import {start as startOps,stop as stopOps,recordError} from './ops/index.js';
 import {onError} from './utils/logger.js';
 import config from './config/config.js';
@@ -13,6 +14,7 @@ async function main() {
   await ensureDirs();
   await initDatabase();
   await loadCommands();
+  const languages=validateLocales();logger.info(`[i18n] registry ${languages.registered}; complete schema ${languages.complete}; partial ${languages.partial}; missing keys fall back to English`);
   const checks=bootSelfTest(registry,commandLoadFailures);if(checks.failed.length)throw new Error('Startup self-test failed: '+checks.failed.join(', '));
   await cleanupStaleJobs(0); // anything left in temp from a previous run is abandoned
   setInterval(() => cleanupStaleJobs(), 10 * 60 * 1000).unref();

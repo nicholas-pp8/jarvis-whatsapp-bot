@@ -1,3 +1,6 @@
+import {replyFailure} from '../recovery/reply.js';
+import {t} from '../i18n/index.js';
+import config from '../config/config.js';
 import { askAi, PROVIDERS } from '../ai/providers.js';
 import logger from '../utils/logger.js';
 
@@ -21,15 +24,13 @@ export default {
       args = args.slice(1);
     }
     const question = args.join(' ').trim();
-    if (!question) return ctx.reply('⚠️ Missing input.\n\nUsage: /ask <question>');
+    if (!question) return ctx.reply(t(ctx,'missing_input',{usage:t(ctx,'usage'),prefix:config.prefix,command:'ask <question>'}));
     try {
       const r = await askAi(question.slice(0, 2000), { prefer });
       let text = r.text.length > MAX_CHARS ? `${r.text.slice(0, MAX_CHARS)}…` : r.text;
       await ctx.reply(`${text}\n\n_via ${r.provider}_`);
     } catch (err) {
-      logger.warn(`[ai] ${err.code || 'ERROR'}`);
-      if (err.code === 'NO_KEYS') return ctx.reply('🔑 AI is not set up yet. The owner needs to add an API key.');
-      return ctx.reply('😕 The AI is busy or unavailable right now. Please try again in a minute.');
+      await replyFailure(ctx,'ask',err);
     }
   },
 };

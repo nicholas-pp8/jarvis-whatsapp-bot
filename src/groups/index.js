@@ -1,6 +1,7 @@
+import {t} from '../i18n/index.js';
 // Group management module entry. Hooked in from the message handler; never touches the connection code.
 import logger from '../utils/logger.js';
-import { initStore, settings, store } from './store.js';
+import { initStore, settings, store, DEFAULTS } from './store.js';
 import { startScheduler } from './scheduler.js';
 import { out } from './limiter.js';
 import { getMeta, dropMeta, num } from './perms.js';
@@ -28,7 +29,9 @@ async function onParticipants(sock, ev) {
     const people = ids.filter((i) => !me.includes(num(i))).slice(0, 5);
     if (!people.length) return;
     const meta = await getMeta(sock, gid, true);
-    const tpl = action === 'add' ? s.welcomeMsg : s.goodbyeMsg;
+    const defaultKey=action==='add'?'welcomeMsg':'goodbyeMsg';
+    const configured=s[defaultKey];
+    const tpl=configured===DEFAULTS[defaultKey]?t({jid:gid,isGroup:true,sender:'group-event'},action==='add'?'welcome_default':'goodbye_default'):configured;
     const text = fill(tpl, { user: people.map((i) => `@${num(i)}`).join(' '), group: meta?.subject || 'the group', count: meta?.participants?.length ?? '' });
     await out.schedule(() => sock.sendMessage(gid, { text, mentions: people }));
   } catch (err) {

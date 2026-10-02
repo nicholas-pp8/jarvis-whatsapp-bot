@@ -1,3 +1,4 @@
+import {t,preference} from '../i18n/index.js';
 import config from '../config/config.js';
 import { LANGS } from '../tts/voices.js';
 import { providerNames } from '../tts/index.js';
@@ -10,6 +11,7 @@ export default {
   usage: 'ttsvoices [language]',
   async run(ctx) {
     const p = config.prefix;
+    if(preference(ctx)!=='eng'){const rows=Object.entries(LANGS).map(([c,l])=>`${c}: ${l.name}\n${l.female||'-'} / ${l.male||'-'}`);await ctx.reply(t(ctx,'desc_ttsvoices')+'\n'+rows.join('\n')+'\n'+t(ctx,'usage')+`: ${p}tts <code> [male|female] <text>\n500 chars; 5/min`);return;}
     const code = (ctx.args[0] || '').toLowerCase();
     if (code && LANGS[code]) {
       const l = LANGS[code];

@@ -1,3 +1,11 @@
+# v1.6.0
+
+- Virtual economy with reviewed transfers, durable anti-abuse checks and private pseudonymous history.
+- Sanitized error IDs, recurrence diagnostics and bounded safe-read retry.
+- 76 non-English 164-key dictionaries plus English; 7847-code versioned registry and explicit fallback. Legacy replies remain partly English.
+- Fix owner self-chat checks for typed WhatsApp PN/LID identities.
+- Preserve corrupt settings files and refuse unpersisted language/sudo/prefix success.
+
 # v1.5.3
 
 - Restore image backend with integrity-checked locked Sharp prebuilt packages only and runtime smoke verification.

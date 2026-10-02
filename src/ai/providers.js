@@ -132,7 +132,7 @@ export async function askAi(question, { prefer } = {}) {
         logger.info(`[ai] ok ${p.id}/${model}`);
         return { text, provider: p.label, id: p.id, model };
       } catch (err) {
-        logger.warn(`[ai] ${p.id}/${model} failed: ${err.message}`);
+        logger.warn(`[ai] ${p.id}/${model} failed, status ${Number(err.status)||0}, class ${['Error','TypeError','AbortError'].includes(err.name)?err.name:'Error'}`);
         if (err.status === 401) break; // bad key: skip this provider's other models
       }
     }

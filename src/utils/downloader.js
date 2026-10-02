@@ -1,3 +1,4 @@
+import {safeRead} from '../recovery/index.js';
 import { spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -166,7 +167,7 @@ export async function httpDownload(url, destDir, { allowedHosts, baseName = 'med
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), config.limits.maxDownloadSeconds * 1000);
   try {
-    const res = await fetch(u, { signal: ctrl.signal, redirect: 'error', headers: { 'user-agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)' } });
+    const res = await safeRead(() => fetch(u, { signal: ctrl.signal, redirect: 'error', headers: { 'user-agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)' } }),{attempts:2});
     if (!res.ok || !res.body) throw new DownloadError('❌ The media could not be fetched.', { code: 'NETWORK' });
     const contentType = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
     if (!allowedTypes.some((re) => re.test(contentType))) throw new DownloadError('❌ That link does not contain supported media.', { code: 'BAD_TYPE' });

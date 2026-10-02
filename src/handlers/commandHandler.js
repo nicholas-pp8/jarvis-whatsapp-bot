@@ -1,3 +1,4 @@
+import {t} from '../i18n/index.js';import {replyFailure} from '../recovery/reply.js';
 import {permitted,fullAccess} from '../permissions/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -73,23 +74,23 @@ export async function handleCommand(ctx, parsed) {
   const cmd = registry.get(parsed.name);
   if (!cmd) {
     logger.warn(`Unknown command: ${parsed.name.slice(0, 30)}`);
-    return ctx.reply(`❓ Unknown command. Type ${config.prefix}menu to see what I can do.`);
+    return ctx.reply(t(ctx,'unknown'));
   }
   if (config.ownerOnly && !fullAccess(ctx)) return;
-  if(!await permitted(ctx,cmd))return ctx.reply('This command requires '+(cmd.ownerOnly?'owner':cmd.requiredLevel||'user')+' permissions.');
+  if(!await permitted(ctx,cmd))return ctx.reply(t(ctx,'permission',{level:cmd.ownerOnly?'owner':cmd.requiredLevel||'user'}));
 
   const now = Date.now();
   if (config.limits.cooldownMs && !ctx.isOwner) {
     const prev = lastUse.get(ctx.sender) || 0;
-    if (now - prev < config.limits.cooldownMs) return ctx.reply(`Wait ${Math.ceil((config.limits.cooldownMs-(now-prev))/1000)} seconds before another command.`);
+    if (now - prev < config.limits.cooldownMs) return ctx.reply(t(ctx,'cooldown',{seconds:Math.ceil((config.limits.cooldownMs-(now-prev))/1000)}));
     lastUse.set(ctx.sender, now);
     if (lastUse.size > 5000) lastUse.clear();
   }
 
-  if(['Utilities','Games','Permissions'].includes(cmd.category)){const key=ctx.sender;const prev=utilityUse.get(key)||0;if(now-prev<3000)return ctx.reply('Wait 3 seconds before another utility/game command.');utilityUse.set(key,now);if(utilityUse.size>5000)utilityUse.clear();}
+  if(['Utilities','Games','Permissions'].includes(cmd.category)){const key=ctx.sender;const prev=utilityUse.get(key)||0;if(now-prev<3000)return ctx.reply(t(ctx,'cooldown',{seconds:3}));utilityUse.set(key,now);if(utilityUse.size>5000)utilityUse.clear();}
   ctx.args = parsed.args;
   if ((cmd.minArgs || 0) > ctx.args.length) {
-    return ctx.reply(`⚠️ Missing input.\n\nUsage: ${config.prefix}${cmd.usage}`);
+    return ctx.reply(t(ctx,'missing_input',{usage:t(ctx,'usage'),prefix:config.prefix,command:cmd.usage}));
   }
   logger.info(`Command received: ${config.prefix}${cmd.name}`);
   recordCommand(cmd.name);
@@ -98,7 +99,6 @@ export async function handleCommand(ctx, parsed) {
     await cmd.run(ctx);
   } catch (err) {
     usage.record(cmd.name,{error:true});
-    logger.error(`Command ${cmd.name} crashed:`, err);
-    await ctx.reply(['Utilities','Games','Permissions'].includes(cmd.category)?`Command stopped: ${String(err.message).slice(0,250)}`:'⚠️ Something went wrong while running that command. Please try again.').catch(() => {});
+    await replyFailure(ctx,cmd.name,err);
   }
 }

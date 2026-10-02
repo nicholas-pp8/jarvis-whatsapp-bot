@@ -1,3 +1,5 @@
+import {t} from '../i18n/index.js';
+import {replyFailure} from '../recovery/reply.js';
 // Shared flow for download commands (files starting with "_" are not loaded as commands).
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -39,12 +41,12 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
         const { searchPin } = await import('../downloaders/pinterest.js');
         hit = await searchPin(query);
       } catch (e) {
-        logger.warn(`Pin search failed: ${e.message}`);
+        logger.warn('Pin search failed');
         throw new DownloadError('❌ Pinterest search is not working right now. Please try again, or send a pin link.', { code: 'SEARCH_FAIL' });
       }
       if (!hit) throw new DownloadError(`🔎 No pins found for "${query}". Try different words or send a pin link.`, { code: 'NO_RESULTS' });
       logger.info('Pin search result picked');
-      await ctx.reply(`📌 Found: ${hit.title || 'a pin'}`);
+      await ctx.reply(`📌 ${hit.title||''}`);
       rawUrl = hit.url;
     }
     if (expect === 'youtube' && !/^https?:\/\//i.test(String(rawUrl || ''))) {
@@ -54,12 +56,12 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
       try {
         hit = await searchYoutube(query);
       } catch (e) {
-        logger.warn(`Search failed: ${e.message}`);
+        logger.warn('Search failed');
         throw new DownloadError('❌ Search is not working right now. Please try again, or send a link.', { code: 'SEARCH_FAIL' });
       }
       if (!hit) throw new DownloadError(`🔎 No results found for "${query}". Try different words or send a link.`, { code: 'NO_RESULTS' });
       logger.info('Search result picked');
-      await ctx.reply(`🔎 Found: ${hit.title}`);
+      await ctx.reply(`🔎 ${hit.title}`);
       rawUrl = hit.url;
     }
     if ((await freeDiskBytes()) < config.limits.minFreeDiskBytes) {
@@ -71,7 +73,7 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
       async () => {
         dir = await createJobDir();
         logger.info(`Download started (${label})`);
-        await ctx.reply(`⏳ Downloading ${label}…`);
+        await ctx.reply('⏳ '+t(ctx,'cat_Downloaders')+': '+t(ctx,'desc_'+(expect==='youtube'?(kind==='audio'?'play':'video'):'pinterest')));
         const media = await fetchMedia(rawUrl, { dir, kind, expect });
         logger.info('Download completed');
 
@@ -89,17 +91,13 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
         logger.info('File sent');
         return media;
       },
-      (pos) => ctx.reply(`🕒 You are #${pos} in the queue. I will start as soon as a slot is free.`).catch(() => {}),
+      (pos) => ctx.reply('🕒 '+pos+' - '+t(ctx,'cat_Downloaders')).catch(() => {}),
     );
     bump('downloads');
     return result;
   } catch (err) {
     bump('failures');
-    logger.warn(`Download failed [${err.code || 'ERROR'}]`);
-    if (err.cause) logger.error('Technical detail:', err.cause);
-    else if (!(err instanceof DownloadError)) logger.error('Unexpected error:', err);
-    const friendly = err instanceof DownloadError ? err.userMessage : '❌ Unable to download this.\n\nThe link may be invalid, unavailable, private, or unsupported.';
-    await ctx.reply(friendly).catch(() => {});
+    await replyFailure(ctx,expect==='youtube'?(kind==='audio'?'play':'video'):'pinterest',err);
   } finally {
     await removeJobDir(dir);
   }

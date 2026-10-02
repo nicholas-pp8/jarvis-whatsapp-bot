@@ -1,3 +1,4 @@
+import {t,preference} from '../i18n/index.js';
 import {fullAccess} from '../permissions/index.js';
 import {usage} from '../ops/index.js';
 import config from '../config/config.js';
@@ -57,33 +58,33 @@ export default {
         sections.push({ cat: c.category, title: String(c.category).toUpperCase() });
       }
     }
-    const lines = [`*${sc(config.botName)} ${sc('menu')}*`, sc('whatsapp assistant'), LINE, ''];
-    if(ctx.isOwner&&!ctx.isGroup){const favorites=usage.summary().owner.filter(([n])=>!['menu','help','status'].includes(n)).slice(0,4);if(favorites.length)lines.push(sc('favorites'),favorites.map(([n])=>p+sc(n)).join('  '),'');}
+    const lines = [`*${sc(config.botName)} ${sc(t(ctx,'menu'))}*`, sc(t(ctx,'assistant')), LINE, ''];
+    if(ctx.isOwner&&!ctx.isGroup){const favorites=usage.summary().owner.filter(([n])=>!['menu','help','status'].includes(n)).slice(0,4);if(favorites.length)lines.push(sc(t(ctx,'favorites')),favorites.map(([n])=>p+sc(n)).join('  '),'');}
     try {
       const s = await snapshot(ctx.commands);
       const top = s.usage.slice(0, 4).map(([n, c]) => `${p}${sc(n)} ${c}`).join('  ') || '-';
       const rows = [
-        [sc('time'), sc(istFull(s.now))],
-        [sc('uptime'), sc(formatDuration(s.uptimeSec))],
-        [sc('ram'), `${formatBytes(s.ramUsed)} / ${formatBytes(s.ramLimit)}`],
-        [sc('cpu'), `${s.cpuPct}%`],
-        [sc('plugins'), String(s.plugins)],
-        [sc('used'), `${s.totalCommands} ${sc('commands')}`],
-        [sc('top'), top],
+        [sc(t(ctx,'time')), sc(istFull(s.now))],
+        [sc(t(ctx,'uptime')), sc(formatDuration(s.uptimeSec))],
+        [sc(t(ctx,'ram')), `${formatBytes(s.ramUsed)} / ${formatBytes(s.ramLimit)}`],
+        [sc(t(ctx,'cpu')), `${s.cpuPct}%`],
+        [sc(t(ctx,'plugins')), String(s.plugins)],
+        [sc(t(ctx,'used')), `${s.totalCommands} ${sc(t(ctx,'commands'))}`],
+        [sc(t(ctx,'top')), top],
       ];
       const w0 = Math.max(...rows.map((r) => r[0].length)) + 2;
-      lines.push(sc('live'), '```', ...rows.map(([a, b]) => `${a.padEnd(w0)}${b}`), '```', '');
+      lines.push(sc(t(ctx,'live')), '```', ...rows.map(([a, b]) => `${a.padEnd(w0)}${b}`), '```', '');
     } catch { /* stats are optional */ }
     for (const s of sections) {
       const cmds = all.filter((c) => c.category === s.cat).sort((a, b) => rank(a) - rank(b));
       if (!cmds.length) continue;
       const rows = cmds.map((c) => {
-        return [`${p}${sc(c.name)}`, sc(SHORT[c.name] || c.description)];
+        return [`${p}${sc(c.name)}`, sc(preference(ctx)==='eng'?(SHORT[c.name]||c.description):t(ctx,'desc_'+c.name))];
       });
       const w = Math.max(...rows.map((r) => r[0].length)) + 2;
-      lines.push(sc(s.title), '```', ...rows.map(([a, b]) => `${a.padEnd(w)}${b}`), '```', '');
+      lines.push(sc(t(ctx,'cat_'+s.cat)), '```', ...rows.map(([a, b]) => `${a.padEnd(w)}${b}`), '```', '');
     }
-    lines.push(LINE, sc(`type ${p}help for a quick guide`));
+    lines.push(LINE, sc(t(ctx,'menu_footer',{prefix:p})));
     await ctx.reply(lines.join('\n'));
   },
 };

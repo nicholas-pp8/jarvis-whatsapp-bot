@@ -1,3 +1,4 @@
+import {t,preference} from '../i18n/index.js';
 import {isSudo} from '../permissions/index.js';
 // Group management commands. Each one is exported by name and wrapped by a thin file in src/commands/.
 import config from '../config/config.js';
@@ -42,14 +43,14 @@ function def(name, o) {
     minArgs: o.minArgs || 0,
     async run(ctx) {
       if (!ctx.isGroup) return ctx.reply('👥 This command only works inside a group.');
-      if (!store()) return ctx.reply('⚠️ Group tools are still starting. Try again in a moment.');
-      if (rateLimited(`cmd:${ctx.jid}:${ctx.sender}`, 10, 60_000) && !ctx.isOwner) return;
+      if (!store()) return ctx.reply(t(ctx,'error_service'));
+      if (rateLimited(`cmd:${ctx.jid}:${ctx.sender}`, 10, 60_000) && !ctx.isOwner) return ctx.reply(t(ctx,'cooldown',{seconds:60}));
       const meta = await getMeta(ctx.sock, ctx.jid);
-      if (!meta) return ctx.reply('⚠️ Could not read this group right now. Please try again.');
+      if (!meta) return ctx.reply(t(ctx,'error_service'));
       const level = levelOf(ctx.sock, meta, ctx.msg, ctx.isOwner);
       const need = o.level || LEVEL.member;
       if (level < need && !(need >= LEVEL.botAdmin && isSudo(ctx) && level >= LEVEL.groupAdmin)) {
-        return ctx.reply(`🔒 ${need >= LEVEL.owner ? 'Only the bot owner' : need >= LEVEL.botAdmin ? 'Only bot admins' : 'Only group admins'} can use this command.`);
+        return ctx.reply(preference(ctx)==='eng'?`🔒 ${need >= LEVEL.owner ? 'Only the bot owner' : need >= LEVEL.botAdmin ? 'Only bot admins' : 'Only group admins'} can use this command.`:t(ctx,'permission',{level:need>=LEVEL.owner?'owner':need>=LEVEL.botAdmin?'bot admin':'group admin'}));
       }
       const me = botMember(ctx.sock, meta);
       if (o.botAdmin && !isAdminP(me)) return ctx.reply('⚠️ Make me a group admin first, then try again.');

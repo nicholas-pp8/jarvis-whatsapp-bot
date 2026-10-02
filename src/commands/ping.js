@@ -5,8 +5,8 @@ export default {
   usage: 'ping',
   async run(ctx) {
     const started = Date.now();
-    const sent = await ctx.reply('🏓 Pong!');
+    const sent = await ctx.reply('🏓' );
     const ms = Date.now() - started;
-    await ctx.sock.sendMessage(ctx.jid, { text: `🏓 Pong! ${ms} ms`, edit: sent.key }).catch(() => {});
+    await ctx.sock.sendMessage(ctx.jid, { text: `🏓 ${ms} ms`, edit: sent.key }).catch(() => {});
   },
 };

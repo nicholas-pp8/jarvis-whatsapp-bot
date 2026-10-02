@@ -1,3 +1,5 @@
+import {replyFailure} from '../recovery/reply.js';
+import {t,preference} from '../i18n/index.js';
 import { jidToNumber } from '../utils/helpers.js';
 import { quiet } from '../recover/index.js';
 import logger from '../utils/logger.js';
@@ -28,16 +30,12 @@ export default {
     let why = '';
     for (const t of [...new Set(tries)]) {
       for (const kind of ['image', 'preview']) {
-        try { url = await ctx.sock.profilePictureUrl(t, kind); if (url) break; } catch (err) { why = String(err?.message || err?.data || err); logger.info(`[getpp] ${kind} for ${jidToNumber(t)}@${t.split('@')[1]} failed: ${why.slice(0, 60)}`); }
+        try { url = await ctx.sock.profilePictureUrl(t, kind); if (url) break; } catch (err) { why = String(err?.message || err?.data || err); logger.info(`[getpp] profile read failed, mode ${kind}`); }
       }
       if (url) break;
     }
     if (!url) {
-      const reason = /not-authorized|401|forbidden/i.test(why) ? 'WhatsApp says the photo is private (their privacy setting hides it from this linked device).'
-        : /item-not-found|404/i.test(why) ? 'They have no profile picture set.'
-        : /timed? ?out|timeout/i.test(why) ? 'WhatsApp did not answer in time. Try again.'
-        : `They may have none or hide it.${why ? ` (WhatsApp said: ${why.slice(0, 40)})` : ''}`;
-      return ctx.sock.sendMessage(to, { text: `No profile picture for +${jidToNumber(jid)}. ${reason}` });
+      return ctx.sock.sendMessage(to,{text:preference(ctx)==='eng'?'No profile picture available. It may be unset or private.':t(ctx,'error_download')});
     }
     try {
       const res = await fetch(url);
@@ -47,8 +45,8 @@ export default {
       logger.info(`[getpp] fetched ${buf.length} bytes, type ${res.headers?.get?.('content-type') || 'unknown'}, image=${isImage}`);
       if (!isImage || buf.length < 200) throw new Error('not an image');
       await ctx.sock.sendMessage(to, { image: buf, caption: `Profile picture of +${jidToNumber(jid)}` });
-    } catch {
-      await ctx.sock.sendMessage(to, { text: 'Could not download that picture. Try again in a moment.' });
+    } catch (err) {
+      await replyFailure({...ctx,reply:text=>ctx.sock.sendMessage(to,{text})},'getpp',err);
     }
   },
 };

@@ -1,7 +1,5 @@
-// Per-group storage. Uses SQLite (better-sqlite3, or node:sqlite) when available and
-// falls back to a JSON file so the bot still works on small hosts without native builds.
+// Per-group storage uses the stable JSON backend; native SQLite probes are disabled.
 import fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
@@ -128,22 +126,7 @@ class JsonStore {
 export async function initStore() {
   if (impl) return impl;
   fs.mkdirSync(config.paths.data, { recursive: true });
-  const tries = process.env.GROUP_STORAGE==='json'?[]:[
-    ['better-sqlite3', async () => new (await import('better-sqlite3')).default(dbFile)],
-    ['node:sqlite', async () => new (await import('node:sqlite')).DatabaseSync(dbFile)],
-  ];
-  for (const [name, open] of tries) {
-    // A broken native module can kill the whole process, so test it in a throw-away child first.
-    const code = name === 'better-sqlite3'
-      ? "const D=require('better-sqlite3');const d=new D(':memory:');d.exec('create table t(a)');d.prepare('select 1').get();"
-      : "const {DatabaseSync}=require('node:sqlite');new DatabaseSync(':memory:').exec('select 1')";
-    const probe = spawnSync(process.execPath, ['-e', code], { cwd: config.root, timeout: 20000, encoding: 'utf8' });
-    if (probe.status !== 0) {
-      logger.info(`[groups] ${name} probe failed (exit ${probe.status}, signal ${probe.signal || 'none'}): ${String(probe.stderr || '').split('\n').find((l) => l.trim()) ?.slice(0, 100) || ''}`);
-      continue;
-    }
-    try { impl = new SqlStore(await open()); backend = name; break; } catch (err) { logger.info(`[groups] ${name} not available (${String(err.message).split('\n')[0].slice(0, 80)})`); }
-  }
+  // Stable JSON backend only. Native SQLite probes disabled on this host.
   if (!impl) { impl = new JsonStore(); backend = 'json'; }
   logger.info(`[groups] storage: ${backend}`);
   return impl;

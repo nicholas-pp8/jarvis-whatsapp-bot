@@ -17,11 +17,13 @@ export default {
     const next = /^(reset|default)$/i.test(raw) ? (process.env.PREFIX || '/').trim() || '/' : raw;
     if (/\s/.test(next)) return ctx.reply('The prefix cannot contain spaces.');
     if (graphemes(next) > 3 || next.length > 12) return ctx.reply('Use a short prefix: 1 to 3 characters.');
-    config.prefix = next;
     try {
       fs.mkdirSync(config.paths.data, { recursive: true });
-      fs.writeFileSync(path.join(config.paths.data, 'prefix.json'), JSON.stringify({ prefix: next }));
-    } catch { /* still active until restart */ }
+      const file=path.join(config.paths.data,'prefix.json');
+      fs.writeFileSync(file+'.tmp',JSON.stringify({prefix:next}));
+      fs.renameSync(file+'.tmp',file);
+    } catch {throw new Error('Settings store unavailable; prefix not changed');}
+    config.prefix=next;
     const warn = /^[A-Za-z0-9]+$/.test(next) ? '\nNote: a letter or number prefix can match normal chat. Commands will look like ' + next + 'menu.' : '';
     await ctx.reply(`Prefix changed to ${next}\nTry: ${next}menu${warn}`);
   },

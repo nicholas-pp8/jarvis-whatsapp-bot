@@ -164,3 +164,5 @@ test('recover switches persist across init', () => {
  store.init();
  assert.deepEqual(store.getSettings(),{antidelete:true,groups:true,status:true,vo:true});
 });
+
+test('prefix write failure preserves both active and stored prefix',async()=>{const config=(await import('../src/config/config.js')).default;const {default:cmd}=await import('../src/commands/setprefix.js');const file=path.join(config.paths.data,'prefix.json');const old=config.prefix,bytes=fs.readFileSync(file);fs.mkdirSync(file+'.tmp');try{await assert.rejects(cmd.run({args:['#'],reply:async()=>{throw new Error('must not claim success');}}),/store unavailable/);assert.equal(config.prefix,old);assert.deepEqual(fs.readFileSync(file),bytes);}finally{fs.rmdirSync(file+'.tmp');}});

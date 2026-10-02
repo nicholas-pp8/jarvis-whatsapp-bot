@@ -46,7 +46,7 @@ export async function download(url, { kind, dir }) {
       return await downloadViaScraper(clean, { kind, dir });
     } catch (e) {
       if (e.code === 'TOO_LARGE') throw e;
-      logger.warn(`[ytscraper] failed (${e.message}), falling back to yt-dlp`);
+      logger.warn('[ytscraper] failed, falling back to yt-dlp');
     }
   }
   let meta;

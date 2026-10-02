@@ -22,7 +22,7 @@ test('command flow with a mocked socket', async () => {
   await handleMessage(sock, { ...mk('/ytaudio'), key: { remoteJid: '918888888888@s.whatsapp.net', id: 'x1' } });
   assert.match(sent.at(-1).content.text, /Missing input/); // hidden alias still resolves
   await handleMessage(sock, { ...mk('/video https://www.pinterest.com/pin/123456/'), key: { remoteJid: '917777777777@s.whatsapp.net', id: 'x2' } });
-  assert.match(sent.at(-1).content.text, /not a youtube link/);
+  assert.match(sent.at(-1).content.text, /download failed.*Reference: [a-f0-9]{10}/);
   await handleMessage(sock, { ...mk('/nope'), key: { remoteJid: '916666666666@s.whatsapp.net', id: 'x3' } });
   assert.match(sent.at(-1).content.text, /Unknown command/);
   const n = sent.length;

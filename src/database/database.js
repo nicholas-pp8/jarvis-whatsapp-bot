@@ -11,14 +11,18 @@ class JsonStore {
     this.data = structuredClone(defaults);
     this.timer = null;
     this.writing = Promise.resolve();
+    this.lastWriteError=null;
+    this.available=true;
   }
 
   async load() {
     try {
       const raw = await fs.readFile(this.file, 'utf8');
-      this.data = { ...structuredClone(this.defaults), ...JSON.parse(raw) };
+      const parsed=JSON.parse(raw);
+      if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||!parsed.settings||typeof parsed.settings!=='object'||Array.isArray(parsed.settings)||['stats','commandUsage'].some(k=>parsed[k]!==undefined&&(!parsed[k]||typeof parsed[k]!=='object'||Array.isArray(parsed[k])))||(parsed.recent!==undefined&&!Array.isArray(parsed.recent)))throw new Error('Invalid settings store');
+      this.data = { ...structuredClone(this.defaults), ...parsed };
     } catch (err) {
-      if (err.code !== 'ENOENT') logger.warn('Database file unreadable, starting fresh');
+      if(err.code!=='ENOENT'){this.available=false;this.lastWriteError=err;logger.warn('Database unreadable; persistence disabled, existing file preserved');}
     }
   }
 
@@ -30,15 +34,17 @@ class JsonStore {
 
   flush() {
     clearTimeout(this.timer);
+    if(!this.available)return this.writing;
     const json = JSON.stringify(this.data);
     this.writing = this.writing
       .then(async () => {
+        this.lastWriteError=null;
         await fs.mkdir(path.dirname(this.file), { recursive: true });
         const tmp = `${this.file}.tmp`;
         await fs.writeFile(tmp, json);
         await fs.rename(tmp, this.file);
       })
-      .catch((err) => logger.warn('Database save failed:', err));
+      .catch((err) => {this.lastWriteError=err;logger.warn('Database save failed; settings persistence unavailable');});
     return this.writing;
   }
 }
@@ -79,4 +85,4 @@ export function setSetting(key, value) {
   db.save();
 }
 
-export const flushDatabase = () => db.flush();
+export async function flushDatabase(strict=false){await db.flush();if(strict&&db.lastWriteError)throw new Error('Settings store unavailable; changes were not saved');}
