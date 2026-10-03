@@ -43,7 +43,7 @@ function readSse(stream, signal) {
 }
 
 // Run one Gradio 5 Space function. `data` entries may be { upload: Buffer, name, type } to upload a file first.
-export async function gradioRun(host, fnIndex, data, { timeoutMs = 40000, request = axios.request } = {}) {
+export async function gradioRun(host, fnIndex, data, { timeoutMs = 40000, request = axios.request, prefix = '/gradio_api' } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const auth = process.env.HF_TOKEN && /\.hf\.space$/.test(new URL(host).hostname) ? { Authorization: 'Bearer ' + process.env.HF_TOKEN } : {};
@@ -54,22 +54,22 @@ export async function gradioRun(host, fnIndex, data, { timeoutMs = 40000, reques
       if (d && d.upload) {
         const form = new FormData();
         form.append('files', d.upload, { filename: d.name || 'file', contentType: d.type || 'application/octet-stream' });
-        const up = await request({ ...base, url: host + '/gradio_api/upload', method: 'POST', data: form, headers: { ...auth, ...form.getHeaders() } });
+        const up = await request({ ...base, url: host + prefix + '/upload', method: 'POST', data: form, headers: { ...auth, ...form.getHeaders() } });
         const p = up.data?.[0];
         if (typeof p !== 'string' || !p) throw new PublicAiError('upload failed');
         args.push({ path: p, orig_name: d.name || 'file', meta: { _type: 'gradio.FileData' } });
       } else args.push(d);
     }
     const session = crypto.randomBytes(6).toString('hex');
-    await request({ ...base, timeout: 15000, url: host + '/gradio_api/queue/join', method: 'POST', data: { data: args, fn_index: fnIndex, session_hash: session } });
-    const r = await request({ ...base, url: host + '/gradio_api/queue/data', params: { session_hash: session }, method: 'GET', responseType: 'stream' });
+    await request({ ...base, timeout: 15000, url: host + prefix + '/queue/join', method: 'POST', data: { data: args, fn_index: fnIndex, session_hash: session } });
+    const r = await request({ ...base, url: host + prefix + '/queue/data', params: { session_hash: session }, method: 'GET', responseType: 'stream' });
     const out = await readSse(r.data, ctrl.signal);
-    return { output: out, fetch: (f) => fetchResult(host, f, base, request) };
+    return { output: out, fetch: (f) => fetchResult(host, f, base, request, prefix) };
   } finally { clearTimeout(timer); }
 }
 
-async function fetchResult(host, file, base, request) {
-  const url = file?.url || (file?.path ? host + '/gradio_api/file=' + file.path : '');
+async function fetchResult(host, file, base, request, prefix = '/gradio_api') {
+  const url = file?.url || (file?.path ? host + prefix + '/file=' + file.path : '');
   let u; try { u = new URL(url); } catch { throw new PublicAiError('no result file'); }
   if (u.protocol !== 'https:' || u.hostname !== new URL(host).hostname) throw new PublicAiError('unexpected result host');
   const img = await request({ ...base, url: u.href, method: 'GET', responseType: 'arraybuffer', maxContentLength: MAX_BYTES });
@@ -117,4 +117,30 @@ export async function fluxImage(prompt, opts = {}) {
   const f = (r.output?.data || []).find((x) => x && (x.url || x.path));
   if (!f) throw new PublicAiError('no output');
   return r.fetch(f);
+}
+
+export const WHISPER_HOST = 'https://openai-whisper.hf.space';
+export const OPUS_HOST = 'https://helsinki-nlp-opus-translate.hf.space';
+export const OCR_HOST = 'https://merterbak-deepseek-ocr-demo.hf.space';
+
+// wav: Buffer (16 kHz mono wav). Returns transcript text.
+export async function transcribeAudio(wav, opts = {}) {
+  const r = await gradioRun(WHISPER_HOST, 2, [{ upload: wav, name: 'audio.wav', type: 'audio/wav' }, 'transcribe'], opts);
+  const t = r.output?.data?.[0];
+  if (typeof t !== 'string') throw new PublicAiError('no transcript');
+  return t.trim();
+}
+
+export async function translateText(text, from, to, opts = {}) {
+  const r = await gradioRun(OPUS_HOST, 2, [text, from || 'Auto Detect', to], { ...opts, prefix: '' });
+  const t = r.output?.data?.[0];
+  if (typeof t !== 'string' || !t.trim()) throw new PublicAiError('no translation');
+  return t.trim();
+}
+
+export async function ocrImage(jpeg, opts = {}) {
+  const r = await gradioRun(OCR_HOST, 6, [{ upload: jpeg, name: 'photo.jpg', type: 'image/jpeg' }, null, '\u{1F4DD} Free OCR', '', 1], opts);
+  const t = r.output?.data?.[0];
+  if (typeof t !== 'string') throw new PublicAiError('no text');
+  return t.trim();
 }
