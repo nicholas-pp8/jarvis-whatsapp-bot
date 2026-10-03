@@ -1,3 +1,9 @@
+## 1.6.2
+
+- Public Instagram, Facebook and Twitter/X video commands with strict post URLs, cookies disabled, queue and limits.
+- F-Droid app-name search, metadata and direct recommended APK delivery with bounded HTTPS requests, package structure checks, SHA-256 report and temporary cleanup.
+- APK hashes are computed, not cryptographically trusted index comparisons; no malware-free claim. Proprietary sources remain unsupported.
+
 ## 1.6.1
 
 - Separate228-key runtime text schema,69 translated non-English files plus English;7 core languages retain runtime English fallback.

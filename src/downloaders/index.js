@@ -2,12 +2,13 @@ import { parseHttpUrl } from '../utils/helpers.js';
 import { DownloadError } from '../utils/downloader.js';
 import * as youtube from './youtube.js';
 import * as pinterest from './pinterest.js';
+import {makeSocial} from './social.js';
 
 /**
  * Registry of platform downloaders. To add a platform, create a module that
  * exports { name, matches(url), download(url, { kind, dir }) } and add it here.
  */
-export const downloaders = [youtube, pinterest];
+export const downloaders = [youtube, pinterest,...['instagram','facebook','twitter'].map(makeSocial)];
 
 export function detectPlatform(rawUrl) {
   const url = parseHttpUrl(rawUrl);

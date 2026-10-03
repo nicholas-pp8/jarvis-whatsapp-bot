@@ -85,10 +85,10 @@ export const downloadQueue = new DownloadQueue({
  * Runs yt-dlp with an argument ARRAY (never through a shell), so user input
  * cannot be interpreted as shell commands.
  */
-export function runYtDlp(args, { cwd, timeoutMs = config.limits.maxDownloadSeconds * 1000 } = {}) {
+export function runYtDlp(args, { cwd, timeoutMs = config.limits.maxDownloadSeconds * 1000, useCookies = true } = {}) {
   return new Promise((resolve, reject) => {
     const base = ['--no-warnings', '--no-playlist', '--no-config', '--ignore-config', '--no-cache-dir', '--js-runtimes', 'node'];
-    if (config.tools.cookies) base.push('--cookies', config.tools.cookies);
+    if (useCookies && config.tools.cookies) base.push('--cookies', config.tools.cookies);
     base.push('--extractor-args', 'youtube:player_client=' + (process.env.YTDLP_CLIENTS || 'tv,android,ios,web_safari,mweb'));
     const child = spawn(config.tools.ytdlp, [...base, ...args], {
       cwd,

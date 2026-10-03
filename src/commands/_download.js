@@ -13,6 +13,8 @@ import { bump } from '../database/database.js';
 import { formatBytes } from '../utils/helpers.js';
 
 const require = createRequire(import.meta.url);
+const socialUse=new Map();
+export function limitSocial(user,now=Date.now()){const recent=(socialUse.get(user)||[]).filter(t=>now-t<60000);if(recent.length>=3)throw new DownloadError('Public-video limit:3 requests per minute. Please wait.');socialUse.set(user,[...recent,now]);if(socialUse.size>5000)socialUse.clear();}
 
 /** Finds the top YouTube result for a text query. Returns { url, title } or null. */
 export async function searchYoutube(query) {
@@ -33,6 +35,7 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
   let rawUrl = ctx.args[0];
   let dir = null;
   try {
+    if(['instagram','facebook','twitter'].includes(expect))limitSocial(ctx.sender);
     if (expect === 'pinterest' && !/^https?:\/\//i.test(String(rawUrl || ''))) {
       const query = ctx.args.join(' ').trim();
       logger.info('Pin search started');
@@ -73,7 +76,7 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
       async () => {
         dir = await createJobDir();
         logger.info(`Download started (${label})`);
-        await ctx.reply('⏳ '+t(ctx,'cat_Downloaders')+': '+t(ctx,'desc_'+(expect==='youtube'?(kind==='audio'?'play':'video'):'pinterest')));
+        await ctx.reply(['instagram','facebook','twitter'].includes(expect)?'Downloading public '+expect+' video...':'⏳ '+t(ctx,'cat_Downloaders')+': '+t(ctx,'desc_'+(expect==='youtube'?(kind==='audio'?'play':'video'):'pinterest')));
         const media = await fetchMedia(rawUrl, { dir, kind, expect });
         logger.info('Download completed');
 
@@ -97,7 +100,8 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
     return result;
   } catch (err) {
     bump('failures');
-    await replyFailure(ctx,expect==='youtube'?(kind==='audio'?'play':'video'):'pinterest',err);
+    if(['instagram','facebook','twitter'].includes(expect)&&err instanceof DownloadError) await ctx.reply(err.userMessage);
+    else await replyFailure(ctx,expect==='youtube'?(kind==='audio'?'play':'video'):'pinterest',err);
   } finally {
     await removeJobDir(dir);
   }
