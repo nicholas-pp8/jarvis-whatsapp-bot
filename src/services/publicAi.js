@@ -46,14 +46,15 @@ function readSse(stream, signal) {
 export async function gradioRun(host, fnIndex, data, { timeoutMs = 40000, request = axios.request } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const base = { signal: ctrl.signal, timeout: timeoutMs, ...NET };
+  const auth = process.env.HF_TOKEN && /\.hf\.space$/.test(new URL(host).hostname) ? { Authorization: 'Bearer ' + process.env.HF_TOKEN } : {};
+  const base = { signal: ctrl.signal, timeout: timeoutMs, headers: auth, ...NET };
   try {
     const args = [];
     for (const d of data) {
       if (d && d.upload) {
         const form = new FormData();
         form.append('files', d.upload, { filename: d.name || 'file', contentType: d.type || 'application/octet-stream' });
-        const up = await request({ ...base, url: host + '/gradio_api/upload', method: 'POST', data: form, headers: form.getHeaders() });
+        const up = await request({ ...base, url: host + '/gradio_api/upload', method: 'POST', data: form, headers: { ...auth, ...form.getHeaders() } });
         const p = up.data?.[0];
         if (typeof p !== 'string' || !p) throw new PublicAiError('upload failed');
         args.push({ path: p, orig_name: d.name || 'file', meta: { _type: 'gradio.FileData' } });
