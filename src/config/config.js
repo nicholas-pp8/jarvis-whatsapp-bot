@@ -2,6 +2,7 @@ import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import settings from './settings.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -37,13 +38,13 @@ async function ffmpegFromPackage() {
 
 const config = {
   root,
-  botName: str('BOT_NAME', 'Jarvis'),
+  botName: settings.bot.name || str('BOT_NAME', 'Jarvis'),
   prefix: str('PREFIX', '/') || '/',
-  ownerNumber: digits(str('OWNER_NUMBER')),
+  ownerNumber: settings.owner.number || digits(str('OWNER_NUMBER')),
   pairingNumber: digits(str('PAIRING_NUMBER')),
-  autoStatusView: bool('AUTO_STATUS_VIEW', false),
-  allowGroups: bool('ALLOW_GROUPS', true),
-  ownerOnly: bool('OWNER_ONLY', false),
+  autoStatusView: settings.bot.autoStatusView ?? bool('AUTO_STATUS_VIEW', false),
+  allowGroups: settings.bot.allowGroups ?? bool('ALLOW_GROUPS', true),
+  ownerOnly: settings.bot.ownerOnly ?? bool('OWNER_ONLY', false),
   paths: {
     downloads: dir('DOWNLOAD_FOLDER', './downloads'),
     temp: dir('TEMP_FOLDER', './temp'),
