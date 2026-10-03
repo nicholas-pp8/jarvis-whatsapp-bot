@@ -1,3 +1,4 @@
+import {rt} from '../i18n/runtime.js';
 import {t} from '../i18n/index.js';import {replyFailure} from '../recovery/reply.js';
 import {permitted,fullAccess} from '../permissions/index.js';
 import fs from 'node:fs/promises';
@@ -77,7 +78,7 @@ export async function handleCommand(ctx, parsed) {
     return ctx.reply(t(ctx,'unknown'));
   }
   if (config.ownerOnly && !fullAccess(ctx)) return;
-  if(!await permitted(ctx,cmd))return ctx.reply(t(ctx,'permission',{level:cmd.ownerOnly?'owner':cmd.requiredLevel||'user'}));
+  if(!await permitted(ctx,cmd))return ctx.reply(t(ctx,'permission',{level:rt(ctx,'role_'+(cmd.ownerOnly?'owner':cmd.requiredLevel||'user'))}));
 
   const now = Date.now();
   if (config.limits.cooldownMs && !ctx.isOwner) {

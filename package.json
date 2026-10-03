@@ -1,6 +1,6 @@
 {
   "name": "jarvis-whatsapp-bot",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Jarvis: a modular multifunctional WhatsApp bot (Baileys) with downloaders, AI, image tools and group management",
   "type": "module",
   "main": "src/index.js",

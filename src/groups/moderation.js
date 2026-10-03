@@ -1,3 +1,4 @@
+import {rt} from '../i18n/runtime.js';
 // Optional auto-moderation. Every feature is OFF until a group admin turns it on.
 import validator from 'validator';
 import logger from '../utils/logger.js';
@@ -32,15 +33,16 @@ async function strike(sock, msg, gid, memberId, reason, s, canDelete) {
   const last = notified.get(key) || 0;
   if (Date.now() - last < 30_000) return;
   notified.set(key, Date.now());
-  const tag = `@${num(memberId)}`;
-  let text = `⚠️ ${tag} ${reason}. Warning ${count}/${s.warnLimit}.`;
+  const ctx={jid:gid,isGroup:true,sender:memberId};const tag = `@${num(memberId)}`;
+  const reasonText=rt(ctx,reason);
+  let text = rt(ctx,'moderation_warning',{user:tag,reason:reasonText,count,limit:s.warnLimit});
   if (count >= s.warnLimit) {
     if (s.warnAction === 'kick' && canDelete) {
       await out.schedule(() => sock.groupParticipantsUpdate(gid, [memberId], 'remove')).catch((e) => logger.warn(`[groups] auto remove failed: ${e.message}`));
       st.clearWarns(gid, memberId);
-      text = `🚫 ${tag} reached ${s.warnLimit} warnings and was removed.`;
+      text = rt(ctx,'moderation_removed',{user:tag,limit:s.warnLimit});
     } else {
-      text = `🚫 ${tag} reached ${s.warnLimit} warnings. Admins, please review.`;
+      text = rt(ctx,'moderation_review',{user:tag,limit:s.warnLimit});
     }
   }
   await out.schedule(() => sock.sendMessage(gid, { text, mentions: [memberId] })).catch(() => {});
@@ -75,21 +77,21 @@ export async function moderate(sock, msg, isOwner) {
     recent.set(k, list);
     if (recent.size > 3000) recent.clear();
 
-    if (s.antilink && hasLink(text)) return strike(sock, msg, gid, memberId, 'links are not allowed here', s, canDelete);
+    if (s.antilink && hasLink(text)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
     if (s.badwords) {
       const lower = text.toLowerCase();
       const words = st.words(gid);
       if (words.some((w) => new RegExp(`(^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'iu').test(lower))) {
-        return strike(sock, msg, gid, memberId, 'that word is not allowed here', s, canDelete);
+        return strike(sock, msg, gid, memberId, 'moderation_words', s, canDelete);
       }
     }
     if (s.antispam && text) {
       const same = list.filter((x) => x.text === text && now - x.t < s.spamWindow * 1000).length;
-      if (same >= s.spamRepeat) return strike(sock, msg, gid, memberId, 'please do not repeat the same message', s, canDelete);
+      if (same >= s.spamRepeat) return strike(sock, msg, gid, memberId, 'moderation_repeat', s, canDelete);
     }
     if (s.antiflood) {
       const burst = list.filter((x) => now - x.t < s.floodWindow * 1000).length;
-      if (burst > s.floodLimit) return strike(sock, msg, gid, memberId, 'you are sending messages too fast', s, canDelete);
+      if (burst > s.floodLimit) return strike(sock, msg, gid, memberId, 'moderation_fast', s, canDelete);
     }
   } catch (err) {
     logger.warn(`[groups] moderation error: ${String(err.message).slice(0, 100)}`);

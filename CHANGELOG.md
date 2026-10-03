@@ -1,3 +1,10 @@
+## 1.6.1
+
+- Separate228-key runtime text schema,69 translated non-English files plus English;7 core languages retain runtime English fallback.
+- Local typed input guidance, group/game/reminder/ops text migration; custom content preserved.
+- Strict locale JSON updater validation and locale-aware standalone rollback.
+- No change to English joke/fact/trivia/word corpora.
+
 # v1.6.0
 
 - Virtual economy with reviewed transfers, durable anti-abuse checks and private pseudonymous history.
