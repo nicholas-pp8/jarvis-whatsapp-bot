@@ -2,6 +2,8 @@ import {ownerCommandContext} from '../utilities/owner.js';
 import {rt} from '../i18n/runtime.js';
 import {t} from '../i18n/index.js';import {replyFailure} from '../recovery/reply.js';
 import {permitted,fullAccess} from '../permissions/index.js';
+import {commandOn} from '../auth/features.js';
+import {ownerGate} from '../auth/gate.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -81,6 +83,8 @@ export async function handleCommand(ctx, parsed) {
   if (config.ownerOnly && !fullAccess(ctx)) return;
   if(!await permitted(ctx,cmd))return ctx.reply(t(ctx,'permission',{level:rt(ctx,'role_'+(cmd.ownerOnly?'owner':cmd.requiredLevel||'user'))}));
 
+  if(!commandOn(cmd))return ctx.reply(`${config.prefix}${cmd.name} is switched off by the owner.`);
+  if(!await ownerGate(ctx,cmd))return;
   ctx = ownerCommandContext(ctx,cmd);
   const now = Date.now();
   if (config.limits.cooldownMs && !ctx.isOwner) {
