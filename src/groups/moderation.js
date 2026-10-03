@@ -10,13 +10,23 @@ const recent = new Map(); // gid:user -> [{t, text}]
 const notified = new Map(); // gid:user -> last notice time
 
 const URL_RE = /(?:https?:\/\/|www\.|chat\.whatsapp\.com\/)\S+/i;
-export function hasLink(text) {
+export function hasLink(text, whitelist = []) {
   if (!text) return false;
-  const m = text.match(URL_RE);
-  if (!m) return false;
-  const raw = m[0].replace(/[.,;!?)]+$/, '');
-  if (/chat\.whatsapp\.com\//i.test(raw)) return true;
-  return validator.isURL(raw, { require_protocol: false }) || /^https?:\/\//i.test(raw);
+  const all = text.match(new RegExp(URL_RE.source, 'gi'));
+  if (!all) return false;
+  const wl = (Array.isArray(whitelist) ? whitelist : []).map((d) => String(d).toLowerCase());
+  for (const m of all) {
+    const raw = m.replace(/[.,;!?)]+$/, '');
+    const isInvite = /chat\.whatsapp\.com\//i.test(raw);
+    const isLink = isInvite || validator.isURL(raw, { require_protocol: false }) || /^https?:\/\//i.test(raw);
+    if (!isLink) continue;
+    if (isInvite) return true;
+    let host = '';
+    try { host = new URL(/^https?:\/\//i.test(raw) ? raw : 'http://' + raw).hostname.toLowerCase().replace(/^www\./, ''); } catch { /* keep empty */ }
+    if (host && wl.some((d) => host === d || host.endsWith('.' + d))) continue;
+    return true;
+  }
+  return false;
 }
 
 export function textOf(message) {
@@ -65,7 +75,7 @@ export async function moderate(sock, msg, isOwner) {
     const memberId = member?.id || sender;
     st.bump(gid, num(memberId));
 
-    if (!(s.antilink || s.antispam || s.antiflood || s.badwords)) return;
+    if (!(s.antilink || s.antiinvite || s.antispam || s.antiflood || s.badwords)) return;
     if (levelOf(sock, meta, msg, isOwner) >= LEVEL.groupAdmin) return; // admins are exempt
     const me = botMember(sock, meta);
     const canDelete = isAdminP(me);
@@ -77,7 +87,8 @@ export async function moderate(sock, msg, isOwner) {
     recent.set(k, list);
     if (recent.size > 3000) recent.clear();
 
-    if (s.antilink && hasLink(text)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
+    if (s.antiinvite && /chat\.whatsapp\.com\/[A-Za-z0-9]+/i.test(text)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
+    if (s.antilink && hasLink(text, s.linkWhitelist)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
     if (s.badwords) {
       const lower = text.toLowerCase();
       const words = st.words(gid);
