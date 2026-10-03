@@ -1,3 +1,9 @@
+## Provider and phone-info update
+
+- Explicit CodeFormer/SnapEdit adapters with bounded images, strict output hosts, daily provider quota/no paid fallback, and durable usage.
+- Owner-only private `/truecaller` with Veriphone/IPQS/DataCrawler basic fields and coarse reported regions, per-number confirmation, free hard caps.
+-170local tests,109registered commands. Synthetic real adapter tests pass; no human-face quality guarantee.
+
 ## 1.6.4
 
 - Resolve WhatsApp LID senders through Baileys phone-number mapping before owner-only command checks. Unmapped LIDs fail closed; group checks use the participant identity.

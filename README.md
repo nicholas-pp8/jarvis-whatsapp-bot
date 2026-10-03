@@ -9,7 +9,7 @@
 <p>
   <img src="https://img.shields.io/badge/Node.js-20%2B-3DDCFF?style=for-the-badge&logo=node.js&logoColor=white&labelColor=0b1c2c" alt="Node" />
   <img src="https://img.shields.io/badge/Baileys-7.0-3DDCFF?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=0b1c2c" alt="Baileys" />
-  <img src="https://img.shields.io/badge/commands-108-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
+  <img src="https://img.shields.io/badge/commands-109-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
   <img src="https://img.shields.io/badge/license-MIT-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="License" />
 </p>
 
@@ -32,6 +32,7 @@
 * **Downloaders**: YouTube audio/video, Pinterest, public Instagram/Facebook/X videos, and F-Droid APK search/info/direct files. See limits and delivery evidence below.
 * **AI**: `/ask` talks to Gemini, Groq or OpenRouter, whichever keys you set. It tries them in order and falls back on errors.
 * **Text to speech**: `/tts` supports 23 languages, with male/female voices where available using Microsoft Edge voices, with Google Translate as fallback. No API key. Defaults: 500 characters and 5 requests per minute for non-owner users (the owner is exempt). When voice-note conversion fails, it sends plain audio.
+* **Phone info**: `/truecaller +COUNTRYNUMBER yes` (alias `/phoneinfo`) combines separate basic provider reports, owner-only/private chat. Explicit number disclosure required; names/regions are unverified, not live location.
 * **Image tools**: stickers with your own pack name, sticker to image, resize, compress, convert. Works as a caption or as a reply to media.
 * **Group management**: welcome and goodbye messages, rules, warnings with history, anti-link, anti-spam, anti-flood, blocked words, mute, scheduled messages, stats, invite link tools, add/remove/promote/demote.
 * **Recover**: deleted messages, deleted and normal statuses, view-once photos, videos and voice notes, profile pictures. Sent to your own chat. See the Recover section below.
@@ -43,7 +44,7 @@
 
 ## Commands
 
-v1.6.3 registers 108 primary commands. Aliases are not counted separately. This list is generated from the current registry; boot imports/schema checks are not end-to-end delivery tests. The default prefix is `/`; change it in `.env`.
+Current build registers 109 primary commands. Aliases are not counted separately. This list is generated from the current registry; boot imports/schema checks are not end-to-end delivery tests. The default prefix is `/`; change it in `.env`.
 
 ### AI (3)
 
@@ -369,3 +370,9 @@ Language registry and honest key-level coverage: [src/i18n/README.md](src/i18n/R
 - PixelBin remains disabled pending retention/disclosure and credit approval; provider-hosted output can remain about30days. Replicate remains disabled pending separate paid approval. Clipdrop retention is unverified. Default `.env.example` disables all external adapters.
 
 See [download notes](docs/downloads-build-notes.md) and [image notes](docs/image-enhancement-notes.md) for checks and sources.
+
+## Explicit image providers and phone info
+
+`/remini codeformer 2 yes` and `/remini snapedit 2 yes` send only the chosen photo to that provider. Both default disabled and require configured free allowance. CodeFormer may consume daily ZeroGPU quota; small-image internal enlargement is normalized to the requested dimensions. SnapEdit uses4credits at2x,7at4x. No automatic image retry/fallback or paid upgrade. Existing Clipdrop remains separate.
+
+`/truecaller +919876543210 yes` sends one number to enabled Veriphone/IPQS/DataCrawler sources, keeps differing claims separate, and excludes exact addresses/emails/age/images. DataCrawler currently supports India only. Free caps are conservative lifetime reservations, no automatic renewal. Provider fees/availability can change; configure before use.
