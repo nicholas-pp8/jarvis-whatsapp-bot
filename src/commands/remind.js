@@ -1,17 +1,24 @@
-import {RuntimeInputError} from '../i18n/runtime.js';
-import {rt} from '../i18n/runtime.js';
-import {privateOperator,selfChat} from '../utilities/owner.js';
-import {reminders} from '../ops/index.js';import {deadline} from '../utilities/time.js';
-const pending=new Map();
-export default {name:'remind',category:'Utilities',ownerOnly:true,description:'Reviewed owner self-chat reminders',usage:'remind add YYYY-MM-DDTHH:mm Asia/Kolkata <text> | list | cancel <id> | confirm <code>',async run(ctx){
- if(!privateOperator(ctx))return ctx.reply(rt(ctx,'private_operator'));
- const recipient=selfChat(ctx)?null:ctx.senderJid.split(':')[0].split('@')[0]+'@s.whatsapp.net';
- const [action,...args]=ctx.args;
- if(action==='list')return ctx.reply(reminders.jobs.filter(j=>(j.recipient||null)===recipient).map(j=>`${j.id}: ${new Date(j.at).toISOString()} - ${j.text}${j.state!=='waiting'?rt(ctx,'reminder_uncertain'):''}`).join('\n')||rt(ctx,'no_reminders'));
- if(action==='cancel'){reminders.cancel(args[0],recipient);return ctx.reply(rt(ctx,'reminder_cancelled'));}
- if(action==='confirm'){const p=pending.get(ctx.sender);if(!p||p.code!==args[0]||p.expires<Date.now())throw new RuntimeInputError('reminder_expired');const j=reminders.create(p.text,p.at,recipient);pending.delete(ctx.sender);return ctx.reply(rt(ctx,'reminder_saved',{id:j.id}));}
- if(action!=='add'||args.length<3)throw new RuntimeInputError('reminder_usage',{prefix:(await import('../config/config.js')).default.prefix});
- const at=deadline(args[0],args[1]),text=args.slice(2).join(' ');if(at<=Date.now()||at-Date.now()>90*86400000||!text||text.length>1000)throw new RuntimeInputError('reminder_limits');
- const code=(await import('node:crypto')).randomBytes(3).toString('hex');pending.set(ctx.sender,{at,text,code,expires:Date.now()+600000});
- return ctx.reply(rt(ctx,'reminder_review',{time:args[0],timezone:args[1],text,prefix:(await import('../config/config.js')).default.prefix,code}));
-}};
+import {reminders} from '../ops/index.js';
+import config from '../config/config.js';
+import {parseReminder,formatWhen} from '../utilities/naturalTime.js';
+const PER_USER=5;
+const who=(ctx)=>String(ctx.senderJid||ctx.sender||'').split(':')[0].split('@')[0];
+const mine=(ctx)=>reminders.jobs.filter((j)=>j.owner===who(ctx)&&j.state==='waiting');
+export default {name:'remind',aliases:['reminder','remindme'],category:'Utilities',description:'Set a reminder in plain words (works for everyone)',
+ usage:'remind 30m drink water | remind 6pm call mom | remind tomorrow 9am gym | remind list | remind cancel <id>',minArgs:1,
+ async run(ctx){
+  const p=config.prefix;const [a,...rest]=ctx.args;const act=a.toLowerCase();
+  if(act==='list'){const l=mine(ctx).sort((x,y)=>x.at-y.at);return ctx.reply(l.length?'⏰ Your reminders:\n'+l.map((j)=>`${j.id}: ${formatWhen(j.at)} - ${j.text.slice(0,80)}`).join('\n')+'\n\nCancel: '+p+'remind cancel <id>':'You have no active reminders.');}
+  if(act==='cancel'||act==='delete'){const id=rest[0];if(!id)return ctx.reply('Usage: '+p+'remind cancel <id> (see '+p+'remind list)');if(!mine(ctx).some((j)=>j.id===id))return ctx.reply('No reminder of yours with that id.');reminders.cancel(id);return ctx.reply('✅ Reminder cancelled.');}
+  const r=parseReminder(ctx.args);
+  if(!r)return ctx.reply('Tell me when and what. Examples:\n'+p+'remind 30m drink water\n'+p+'remind 6pm call mom\n'+p+'remind tomorrow 9am gym\n'+p+'remind monday 10am meeting');
+  if(r.error==='min')return ctx.reply('Minimum is 1 minute.');
+  if(r.error==='time')return ctx.reply('I could not read the time. Try: 30m, 2h, 6pm, 18:30, tomorrow 9am, monday 10am.');
+  if(r.error==='text')return ctx.reply('What should I remind you about? Example: '+p+'remind 6pm call mom');
+  if(r.text.length>300)return ctx.reply('Reminder text: max 300 characters.');
+  if(r.at-Date.now()>90*86400000)return ctx.reply('Max 90 days ahead.');
+  if(mine(ctx).length>=PER_USER)return ctx.reply('You already have '+PER_USER+' active reminders. Cancel one first ('+p+'remind list).');
+  const to=ctx.jid;const text=ctx.isGroup?`@${who(ctx)}: ${r.text}`:r.text;
+  try{const j=reminders.create(text,r.at,to,who(ctx));return ctx.reply(`✅ Reminder set for ${formatWhen(r.at)}\n"${r.text}"\nid: ${j.id}`+(ctx.isGroup?'\n_It will be posted in this group._':''));}
+  catch(e){return ctx.reply('Could not save the reminder: it may be too many reminders on the bot right now. Try again later.');}
+ }};
