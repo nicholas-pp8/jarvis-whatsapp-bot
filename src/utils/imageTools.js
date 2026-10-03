@@ -109,7 +109,7 @@ export function addStickerExif(webp, pack, author) {
   return out;
 }
 
-export async function toSticker(buf, { animated, pack = 'Jarvis', author = 'Rohan' }) {
+export async function toSticker(buf, { animated, pack = 'Jarvis', author = 'Rohan', crop = false }) {
   let webp;
   if (animated) {
     const dir = await fs.mkdtemp(path.join(config.paths.temp, 'stk-'));
@@ -125,7 +125,7 @@ export async function toSticker(buf, { animated, pack = 'Jarvis', author = 'Roha
     if (webp.length > 900 * 1024) throw new Error('STICKER_TOO_BIG');
   } else {
     const s = await sharp();
-    webp = await s(buf).resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).webp({ quality: 80 }).toBuffer();
+    webp = await s(buf).resize(512, 512, { fit: crop ? 'cover' : 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).webp({ quality: 80 }).toBuffer();
   }
   return addStickerExif(webp, pack, author);
 }
