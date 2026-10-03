@@ -1,3 +1,4 @@
+import {getPerformanceProfile} from '../utils/performanceMode.js';
 import {t,preference} from '../i18n/index.js';
 import config from '../config/config.js';
 import { downloadQueue } from '../utils/downloader.js';
@@ -20,7 +21,7 @@ export default {
   usage: 'status',
   async run(ctx) {
     const s = await snapshot(ctx.commands);
-    if(preference(ctx)!=='eng'){const q=downloadQueue.stats;const lines=[`*${s.botName}*`,t(ctx,'desc_status'),`${t(ctx,'time')}: ${istFull(s.now)}`,`${t(ctx,'uptime')}: ${formatDuration(s.uptimeSec)}`,`${t(ctx,'ram')}: ${formatBytes(s.ramUsed)} / ${formatBytes(s.ramLimit)}`,`${t(ctx,'cpu')}: ${s.cpuPct}%`,`${t(ctx,'plugins')}: ${s.plugins}`,`${t(ctx,'used')}: ${s.totalCommands}`,`${t(ctx,'cat_Downloaders')}: ${q.running} / ${q.waiting}`];await ctx.reply(lines.join('\n'));return;}
+    if(preference(ctx)!=='eng'){const q=downloadQueue.stats;const lines=[`*${s.botName}*`,t(ctx,'desc_status'),`${t(ctx,'time')}: ${istFull(s.now)}`,`${t(ctx,'uptime')}: ${formatDuration(s.uptimeSec)}`,`${t(ctx,'ram')}: ${formatBytes(s.ramUsed)} / ${formatBytes(s.ramLimit)}`,`${t(ctx,'cpu')}: ${s.cpuPct}%`,`Mode: ${getPerformanceProfile().mode}`,`${t(ctx,'plugins')}: ${s.plugins}`,`${t(ctx,'used')}: ${s.totalCommands}`,`${t(ctx,'cat_Downloaders')}: ${q.running} / ${q.waiting}`];await ctx.reply(lines.join('\n'));return;}
     const q = downloadQueue.stats;
     const p = config.prefix;
     const state = s.wa === 'online' ? 'ᴏɴʟɪɴᴇ' : s.wa === 'offline' ? 'ᴏꜰꜰʟɪɴᴇ' : 'ꜱᴛᴀʀᴛɪɴɢ';
@@ -34,6 +35,7 @@ export default {
     lines.push(sc('server'), ...table([
       [sc('ram'), `${formatBytes(s.ramUsed)} / ${formatBytes(s.ramLimit)}`],
       [sc('cpu'), `${s.cpuPct}%`],
+      [sc('mode'), sc(getPerformanceProfile().mode)],
       [sc('disk free'), s.diskFree == null ? '-' : formatBytes(s.diskFree)],
       [sc('queue'), `${q.running} / ${q.waiting}`],
     ]), '');

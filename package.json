@@ -9,7 +9,8 @@
     "dev": "node --watch src/index.js",
     "setup:ytdlp": "node scripts/install-ytdlp.js",
     "postinstall": "node scripts/install-ytdlp.js",
-    "test": "node --test --test-force-exit test/*.test.js"
+    "test": "node --test --test-force-exit test/*.test.js",
+    "check:panel": "node scripts/panel-check.js"
   },
   "engines": {
     "node": ">=20"

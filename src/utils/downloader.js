@@ -1,3 +1,4 @@
+import {getPerformanceProfile,mediaDelay} from './performanceMode.js';
 import {safeRead} from '../recovery/index.js';
 import { spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
@@ -23,8 +24,9 @@ export class DownloadError extends Error {
 /* ------------------------------ queue ------------------------------ */
 
 export class DownloadQueue {
-  constructor({ concurrency, maxQueue, maxPerUser }) {
+  constructor({ concurrency, maxQueue, maxPerUser, profile }) {
     this.concurrency = concurrency;
+    this.profile = profile;
     this.maxQueue = maxQueue;
     this.maxPerUser = maxPerUser;
     this.running = 0;
@@ -48,7 +50,7 @@ export class DownloadQueue {
     this.perUser.set(userId, mine + 1);
     return new Promise((resolve, reject) => {
       const job = { task, resolve, reject, userId };
-      if (this.running >= this.concurrency) {
+      if (this.waiting.length || this.running >= (this.profile?.().concurrency || this.concurrency)) {
         this.waiting.push(job);
         onQueued?.(this.waiting.length);
       } else {
@@ -60,21 +62,21 @@ export class DownloadQueue {
   #start(job) {
     this.running++;
     Promise.resolve()
-      .then(job.task)
+      .then(async()=>{if(this.profile)await mediaDelay();return job.task();})
       .then(job.resolve, job.reject)
       .finally(() => {
         this.running--;
         const left = (this.perUser.get(job.userId) || 1) - 1;
         if (left <= 0) this.perUser.delete(job.userId);
         else this.perUser.set(job.userId, left);
-        const next = this.waiting.shift();
-        if (next) this.#start(next);
+        while(this.waiting.length && this.running < (this.profile?.().concurrency || this.concurrency)) this.#start(this.waiting.shift());
       });
   }
 }
 
 export const downloadQueue = new DownloadQueue({
   concurrency: config.limits.concurrent,
+  profile: getPerformanceProfile,
   maxQueue: config.limits.maxQueue,
   maxPerUser: config.limits.maxJobsPerUser,
 });

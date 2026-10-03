@@ -10,3 +10,6 @@ bin/yt-dlp*
 !downloads/.gitkeep
 !temp/.gitkeep
 !data/.gitkeep
+
+.runtime/
+__pycache__/

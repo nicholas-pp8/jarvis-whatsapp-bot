@@ -247,6 +247,39 @@ npm start
 
 On first start the bot prints an 8 character **pairing code**. On your phone open WhatsApp, go to Linked devices, choose Link with phone number, and type the code. The login is saved in `auth/` so you only do this once.
 
+## Panel setup: Node.js or Python
+
+Both paths run the same Node.js WhatsApp engine. Python is a startup helper, not a separate Python bot. No setup can promise zero errors on every host.
+
+### Node.js panel
+
+Select Node20+ (Node22 recommended). Upload/clone the repository, not another machine's `node_modules`.
+
+```bash
+npm ci
+cp .env.example .env # only on a new install; never replace an existing .env
+npm run check:panel
+npm start
+```
+
+Panel startup command: `npm start`. Set `OWNER_NUMBER`/`PAIRING_NUMBER` in private `.env`. On a constrained host set `GROUP_STORAGE=json`. Configure the panel to restart the process after an unexpected exit. `npm ci` needs internet on first setup; package install normally supplies ffmpeg, but blocked downloads or an incompatible binary require a host ffmpeg and `FFMPEG_PATH`.
+
+### Python panel
+
+Select Python3.9+ on Linux glibc x64/arm64, upload/clone the repository at the panel project root, and choose `start.py` as its startup file. Do not copy the private live host launcher or Neha files. No pip packages are needed.
+
+```bash
+python3 start.py --setup-only
+# edit private .env and keep auth/data persistent
+python3 start.py
+```
+
+The helper uses an existing Node20+ plus npm when available. Otherwise it downloads pinned Node22.23.2 from nodejs.org and verifies a bundled SHA256 before extraction. It installs locked npm dependencies if preflight fails, checks core imports, Sharp and ffmpeg, and only then starts the stable Jarvis runner. `--check` is read-only: no install, downloads, pairing or provider calls. Repeated starts preserve `.env`, auth and data; setup failure stops with an error instead of connecting a half-set-up bot. No unlimited restart loop or source overwrite.
+
+Python-only panels that forbid executable child processes cannot run this Node engine. Automatic runtime installation does not support Alpine/musl, Windows, macOS or other CPUs; use a host-provided Node20+ and npm there. Download/build restrictions, native package compatibility, disk/RAM/CPU quotas and provider failures still matter. First setup may take several minutes and substantially more disk than steady-state use. No root access is needed. Run only one instance against a given auth directory.
+
+Persist `.env`, `auth/`, `data/` and `.runtime/`. Never publish them. Moving panel types does not require pairing again if the same saved auth is kept. Neither entrypoint launches Neha or another bot. If dependencies change, run `npm ci` manually; a successful preflight does not prove every installed version matches the new lockfile.
+
 ## Configure
 
 Everything is in `.env`. See `.env.example` for all options.
@@ -390,4 +423,14 @@ The games extension uses one session manager for17new brain commands and10multip
 - New banks/prompts and help currently use English. Existing language menus fall back to command descriptions. Offline question banks are small reviewed sets, not live trivia feeds.
 - The owner selected JSON after an isolated better-sqlite3@13.0.3 host Node22.11.0 probe crashed with SIGSEGV11. No other SQLite driver installed. Existing optional dependency and old game-score file left alone.
 
-Downloaded videos are normalized centrally before WhatsApp delivery: H.264 baseline/yuv420p video, AAC stereo audio when present, MP4 faststart, dimensions bounded by configured height. Conversion and full output decode are time-limited (120seconds each), one encoding thread, actual output size checked. Bad/truncated output is rejected rather than sent. YouTube, Pinterest and public social downloads share this sender. This is not confirmation that every recipient handset plays the result; a live phone retest follows deployment.
+Downloaded videos are normalized centrally before WhatsApp delivery: H.264 baseline/yuv420p video, AAC stereo audio when present, MP4 faststart, dimensions bounded by configured height. Compatible H264/yuv420p videos are fully remuxed; incompatible audio alone is transcoded when possible, otherwise ultrafast video conversion is used. Conversion and full output decode are time-limited (15minutes each), one encoding thread, actual output size checked. Download commands send progress once per minute while preparing video. Bad/truncated output is rejected rather than sent. YouTube, Pinterest and public social downloads share this sender. This is not confirmation that every recipient handset plays the result; a live phone retest follows deployment.
+
+## Resource modes
+
+Owner-only `/power`, `/balanced`, `/save` persist in `data/performance-mode.json`; `/power status` (or either other command with `status`) reads the current mode. Balanced is the default on a new install. `/status` shows it.
+
+- Balanced: one queued media job, one FFmpeg/Sharp worker, no added delay. Sharp cache50MiB, capped16MiB on small hosts.
+- Power: up to two media jobs and two FFmpeg/Sharp workers, Sharp cache64MiB. Below512MiB host memory or one CPU quota, power remains one worker/job and16MiB cache to protect the host.
+- Save: one media job/worker,3second delay before each queued heavy job, Sharp cache disabled. It can reduce media working-set pressure, not guarantee a RAM limit.
+
+Modes affect queued downloads/image enhancement, central video preparation and global Sharp processing. They do not change provider quotas, image resolution, file limits, codec checks, full-file delivery, WhatsApp reconnect, games or group timers. Running work is not canceled when the mode changes. Changing mode does not allocate host RAM/CPU, increase Node heap or guarantee speed. Many commands remain light and unaffected. All video modes keep fast selective conversion and15minute conversion/decode caps so saver does not bring back the short full-song timeout. Performance is best-effort under host/provider limits. No paid provider retry or fallback.
