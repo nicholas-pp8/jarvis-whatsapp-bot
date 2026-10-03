@@ -9,14 +9,14 @@
 <p>
   <img src="https://img.shields.io/badge/Node.js-20%2B-3DDCFF?style=for-the-badge&logo=node.js&logoColor=white&labelColor=0b1c2c" alt="Node" />
   <img src="https://img.shields.io/badge/Baileys-7.0-3DDCFF?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=0b1c2c" alt="Baileys" />
-  <img src="https://img.shields.io/badge/commands-65-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
+  <img src="https://img.shields.io/badge/commands-108-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
   <img src="https://img.shields.io/badge/license-MIT-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="License" />
 </p>
 
-<p><a href="https://nicholas-pp8.github.io/jarvis/"><b>Setup site: nicholas-pp8.github.io/jarvis</b></a> (guide + .env generator)</p>
+<p>Use the install and configuration steps below. The old setup site is not currently enabled.</p>
 
 
-<p><b>A modular WhatsApp bot with downloaders, AI chat, image tools and group management.</b><br/>Pairing-code login, no QR. Runs on small free hosts (about 150 MB RAM).</p>
+<p><b>A modular WhatsApp bot with downloaders, AI chat, image tools and group management.</b><br/>Pairing-code login, no QR. Resource use varies by host, connected services and active jobs.</p>
 
 <img src="assets/demo.gif" width="460" alt="Example chat (illustrative)" />
 
@@ -29,7 +29,7 @@
 
 ## Features
 
-* **Downloaders**: YouTube audio (`/play`) and video (`/video`) by name or link, Pinterest images and videos by link or search term.
+* **Downloaders**: YouTube audio/video, Pinterest, public Instagram/Facebook/X videos, and F-Droid APK search/info/direct files. See limits and delivery evidence below.
 * **AI**: `/ask` talks to Gemini, Groq or OpenRouter, whichever keys you set. It tries them in order and falls back on errors.
 * **Text to speech**: `/tts` supports 23 languages, with male/female voices where available using Microsoft Edge voices, with Google Translate as fallback. No API key. Defaults: 500 characters and 5 requests per minute for non-owner users (the owner is exempt). When voice-note conversion fails, it sends plain audio.
 * **Image tools**: stickers with your own pack name, sticker to image, resize, compress, convert. Works as a caption or as a reply to media.
@@ -43,99 +43,187 @@
 
 ## Commands
 
-All 65 commands. The default prefix is `/` and can be changed in `.env`.
-
-### General (4)
-
-| Command | What it does | Aliases |
-| --- | --- | --- |
-| `/menu` | Show all commands | `/start`, `/commands` |
-| `/help [command]` | Explain how to use the bot or one command | `/h` |
-| `/ping` | Check that the bot is alive and how fast it replies | - |
-| `/setprefix <prefix>` | Change the command prefix: any symbol, number, letter or emoji (1 to 3 characters). Saved across restarts. `/setprefix reset` always works | `/prefix` |
-
-### Downloaders (3)
-
-| Command | What it does | Aliases |
-| --- | --- | --- |
-| `/play <name or link>` | Download the audio of a YouTube video (M4A) | `/ytaudio`, `/ytmp3`, `/song` |
-| `/video <name or link>` | Download a YouTube video (MP4) | `/ytvideo`, `/ytmp4`, `/yt` |
-| `/pinterest <name or link>` | Find a Pinterest pin by name, or download one from a link | `/pin` |
-
-### Image tools (6)
-
-| Command | What it does | Aliases |
-| --- | --- | --- |
-| `/sticker (send or reply to an image)` | Make a sticker from an image or short video | `/s`, `/stiker` |
-| `/toimg (reply to a sticker)` | Turn a sticker into an image | `/toimage`, `/unsticker` |
-| `/resize 800 (send or reply to an image)` | Resize an image to a width in pixels | - |
-| `/compress 60 (quality 10-95, optional)` | Make an image smaller in file size | `/shrink` |
-| `/qr <text or URL>` | Generate a 1024px PNG QR code | - |
-| `/convert png (png, jpg or webp)` | Convert an image to png, jpg or webp | `/toformat` |
+v1.6.3 registers 108 primary commands. Aliases are not counted separately. This list is generated from the current registry; boot imports/schema checks are not end-to-end delivery tests. The default prefix is `/`; change it in `.env`.
 
 ### AI (3)
 
 | Command | What it does | Aliases |
 | --- | --- | --- |
-| `/ask <question>` | Ask an AI anything | `/ai` |
-| `/tts [language] [male, female or voice] <text>` | Text to audio. Also works as a reply. Examples: `/tts hi Namaste dosto`, `/tts en male Good morning` | `/speak`, `/say` |
-| `/ttsvoices [language]` | List languages and voices | `/voices` |
+| `/ask` | Ask an AI anything | `/ai` |
+| `/tts` | Turn text into a voice message | `/speak`, `/say` |
+| `/ttsvoices` | List voice languages and voices | `/voices` |
 
-### Bot (3)
-
-| Command | What it does | Aliases |
-| --- | --- | --- |
-| `/update` | Owner self-chat update review and confirmation | - |
-| `/usage` | Private owner usage insights | - |
-| `/status` | Show bot status: uptime, memory, usage and more | - |
-
-### Recover (6)
-
-Owner only, except `/getpp`. Recovered items are sent to your own chat ("message yourself"). If you type one of these commands inside someone else's chat, the bot deletes your command message and answers in your own chat.
+### Diagnostics (1)
 
 | Command | What it does | Aliases |
 | --- | --- | --- |
-| `/statusdl [number, name or all]` | List saved statuses and download them | `/sdl`, `/savestatus` |
-| `/antidelete [on, off, groups on, status on, vo on]` | Turn recovery of deleted messages, statuses and view-once on or off | `/antidel` |
-| `/deleted [number]` | List the deleted items the bot caught, or send one again | `/recover` |
-| `/vv` | Recover a view-once photo or video (reply to it, or the latest saved) | `/viewonce` |
-| `/vvn` | Recover a view-once voice note | `/vvvoice` |
-| `/getpp [reply, @mention or number]` | Get the profile picture of a user | `/pp`, `/dp` |
+| `/errors` | Private error IDs and recurrence counts; no message contents | - |
 
-**What to know:** only items that arrive after the bot is online and the feature is on can be recovered. Nothing before that, and nothing while the bot is offline. Items are kept for 25 hours (statuses) or 48 hours (messages and view-once) with an 80 MB cap, then deleted. All four recover switches are ON by default. You can turn each off; choices persist across restarts. WhatsApp decides what a linked device receives, so view-once recovery can fail if WhatsApp only sends a placeholder. It stays on your own host and is never uploaded anywhere.
-
-### Group management (26)
+### Downloaders (10)
 
 | Command | What it does | Aliases |
 | --- | --- | --- |
-| `/add 919876543210` | Add a person by number (admins) | - |
-| `/announce <text>` | Post an announcement (admins) | - |
-| `/antiflood on|off` | Turn Anti-flood on or off (admins) | - |
-| `/antilink on|off` | Turn Anti-link on or off (admins) | - |
-| `/antispam on|off` | Turn Anti-spam on or off (admins) | - |
-| `/blockword add|remove|list [word]` | Manage blocked words (admins) | `/badword` |
-| `/botadmin add|remove|list @person` | Manage bot admins (owner only) | - |
-| `/demote @person` | Remove admin rights (admins) | - |
-| `/goodbye on|off` | Turn Goodbye message on or off (admins) | - |
-| `/groupconfig [setting value]` | View or change group settings (admins) | `/gconfig`, `/gsettings` |
+| `/apk` | Find free apps and validated official APKs | - |
+| `/apkdownload` | Find free apps and validated official APKs | - |
+| `/apkinfo` | Find free apps and validated official APKs | - |
+| `/apksearch` | Find free apps and validated official APKs | - |
+| `/facebook` | Download a public facebook video | `/fb` |
+| `/instagram` | Download a public instagram video | `/ig`, `/insta` |
+| `/pinterest` | Find a Pinterest pin by name, or download one from a link | `/pin` |
+| `/play` | Download the audio of a YouTube video (M4A) | `/ytaudio`, `/ytmp3`, `/song` |
+| `/twitter` | Download a public twitter video | `/x`, `/tweet` |
+| `/video` | Download a YouTube video (MP4) | `/ytvideo`, `/ytmp4`, `/yt` |
+
+### Economy (9)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/achievements` | Virtual economy achievements | - |
+| `/balance` | Virtual economy balance | - |
+| `/daily` | Virtual economy daily | - |
+| `/earn` | Virtual economy earn | - |
+| `/economy` | Virtual economy economy | - |
+| `/economyrules` | Configure virtual earning limits | - |
+| `/leaderboard` | Virtual economy leaderboard | - |
+| `/pay` | Review and confirm a virtual-coin transfer | - |
+| `/profile` | Virtual economy profile | - |
+
+### Games (12)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/8ball` | Playful random answer, not advice | - |
+| `/choose` | Pick from 2-10 options | - |
+| `/coinflip` | Flip a coin | - |
+| `/dice` | Roll one six-sided die | - |
+| `/fact` | A simple fact | - |
+| `/joke` | A short joke | - |
+| `/jumble` | Unscramble a word | - |
+| `/poll` | Create a simple group poll | - |
+| `/quiz` | Trivia with private sessions and scores | - |
+| `/quote` | A short encouraging thought | - |
+| `/ttt` | Play tic-tac-toe vs Jarvis | - |
+| `/wordgame` | Make words from six letters | - |
+
+### General (4)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/help` | Explain how to use the bot or one command | `/h` |
+| `/menu` | Show all commands | `/start`, `/commands` |
+| `/ping` | Check that the bot is alive and how fast it replies | - |
+| `/setprefix` | Change the command prefix (any symbol, number, letter or emoji) | `/prefix` |
+
+### Group (26)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/add` | Add a person by number (admins) | - |
+| `/announce` | Post an announcement (admins) | - |
+| `/antiflood` | Turn label_antiflood on or off (admins) | - |
+| `/antilink` | Turn label_antilink on or off (admins) | - |
+| `/antispam` | Turn label_antispam on or off (admins) | - |
+| `/blockword` | Manage blocked words (admins) | `/badword` |
+| `/botadmin` | Manage bot admins (owner only) | - |
+| `/demote` | Remove admin rights (admins) | - |
+| `/goodbye` | Turn label_goodbye on or off (admins) | - |
+| `/groupconfig` | View or change group settings (admins) | `/gconfig`, `/gsettings` |
 | `/groupinfo` | Show info about this group | `/ginfo` |
 | `/grouplink` | Get the invite link (admins) | `/link` |
 | `/groupstats` | Message counts and top members | `/gstats` |
 | `/mute` | Only admins can send (admins) | - |
-| `/promote @person` | Make someone an admin (admins) | - |
-| `/remove @person` | Remove a person (admins) | `/kick` |
-| `/resetwarn @person` | Clear warnings of a member (admins) | `/clearwarn` |
+| `/promote` | Make someone an admin (admins) | - |
+| `/remove` | Remove a person (admins) | `/kick` |
+| `/resetwarn` | Clear warnings of a member (admins) | `/clearwarn` |
 | `/revoke` | Reset the invite link (admins) | `/resetlink` |
 | `/rules` | Show the group rules | - |
-| `/schedule 09:00 text | list | del <id>` | Daily scheduled message (admins) | - |
-| `/setrules <text>` | Set the group rules (admins) | - |
-| `/tagall [message]` | Mention everyone once (admins, 10 min cooldown) | `/everyone` |
+| `/schedule` | Daily scheduled message (admins) | - |
+| `/setrules` | Set the group rules (admins) | - |
+| `/tagall` | Mention everyone once (admins, 10 min cooldown) | `/everyone` |
 | `/unmute` | Everyone can send (admins) | - |
-| `/warn @person [reason]` | Warn a member (admins) | - |
-| `/warnings [@person]` | Show warnings of a member | `/warns` |
-| `/welcome on|off` | Turn Welcome message on or off (admins) | - |
+| `/warn` | Warn a member (admins) | - |
+| `/warnings` | Show warnings of a member | `/warns` |
+| `/welcome` | Turn label_welcome on or off (admins) | - |
 
-Group commands only work inside groups. "(admins)" means WhatsApp group admins or higher. The bot must be a group admin for `/add`, `/remove`, `/promote`, `/demote`, `/grouplink`, `/revoke`, `/mute`, `/unmute` and for deleting messages.
+### Image (11)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/compress` | Make an image smaller in file size | `/shrink` |
+| `/convert` | Convert an image to png, jpg or webp | `/toformat` |
+| `/denoise` | Reduce noise locally with Sharp | - |
+| `/qr` | Generate a PNG QR code | - |
+| `/remini` | Enhance/upscale a photo; local baseline or configured provider | `/enhance` |
+| `/resize` | Resize an image to a width in pixels | - |
+| `/restore` | Restore faces using an approved external provider | - |
+| `/sharpen` | Sharpen a photo locally with Sharp | - |
+| `/sticker` | Make a sticker from an image or short video | `/s`, `/stiker` |
+| `/toimg` | Turn a sticker into an image | `/toimage`, `/unsticker` |
+| `/upscale` | Upscale a photo | - |
+
+### Language (4)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/language` | Select your interface language | - |
+| `/languages` | Search all registered language codes; show translation coverage | - |
+| `/resetlanguage` | Reset your or group language to English | - |
+| `/setlanguage` | Set the group interface language (group admins) | - |
+
+### Permissions (4)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/addsudo` | Grant a mentioned user sudo command access | - |
+| `/checksudo` | Check your own permission status | - |
+| `/delsudo` | Remove a mentioned sudo user | - |
+| `/listsudo` | List limited sudo users privately | - |
+
+### Recover (6)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/antidelete` | Recover deleted messages and statuses (sent to your own chat) | `/antidel` |
+| `/deleted` | Show recently deleted items I caught | `/recover` |
+| `/getpp` | Get the profile picture of a user | `/pp`, `/dp` |
+| `/statusdl` | List and download saved WhatsApp statuses | `/sdl`, `/savestatus` |
+| `/vv` | Recover a view-once photo or video | `/viewonce` |
+| `/vvn` | Recover a view-once voice note | `/vvvoice` |
+
+### System (1)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/speedtest` | Host HTTPS latency (quick, not bandwidth) | - |
+
+### Utilities (14)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/ascii` | English text to ASCII art | - |
+| `/countdown` | Time until a calendar date | - |
+| `/date` | Current calendar date | - |
+| `/filetype` | Identify a safe file by content | - |
+| `/html` | Extract text from a public HTML page | - |
+| `/linkpreview` | Get safe public URL metadata | - |
+| `/password` | Create a private password without storing it | - |
+| `/pdf` | English text to a PDF | - |
+| `/remind` | Reviewed owner self-chat reminders | - |
+| `/system` | Non-sensitive server statistics | `/stats` |
+| `/time` | Current timezone time | - |
+| `/timestamp` | Current Unix time in seconds | - |
+| `/unzip` | Extract a small safe ZIP | - |
+| `/zip` | Compress one safe file | - |
+
+### WhatsApp (3)
+
+| Command | What it does | Aliases |
+| --- | --- | --- |
+| `/status` | Show bot status: uptime, memory, usage and more | - |
+| `/update` | Review and confirm a GitHub update | - |
+| `/usage` | Private usage insights | - |
+
+Use `/help <command>` for current arguments and permission checks. Group-admin actions also need the bot to have the required group rights. Recovery and sudo rules are described below.
 
 ## Install
 
@@ -199,7 +287,8 @@ src/
   groups/       group module: storage, permissions, moderation, scheduler, commands
   recover/      deleted message, status and view-once cache
   tts/          speech providers, voices and limits
-  downloaders/  YouTube and Pinterest
+  downloaders/  YouTube, Pinterest and public social videos
+  services/     bounded image-enhancement adapters
   ai/           AI providers
   connection/   Baileys connection and pairing
   handlers/     message and command handling
@@ -259,7 +348,7 @@ Every startup imports and validates all command definitions, permissions, argume
 
 Image host repair installs only the two locked Linux-x64 Sharp/libvips prebuilt packages and runs a PNG-to-WebP runtime check, without SQLite or build scripts. Document/audio quote cache stores metadata for up to 150 recent media messages, not original file bytes. Utility quote fallback checks the same chat.
 
-## Virtual economy, recovery and language interface (next release, not deployed)
+## Virtual economy, recovery and language interface (deployed in v1.6.x)
 
 Virtual coins have no monetary value, gambling or cash-out. `/balance`, `/daily`, `/earn`, `/profile`, `/leaderboard`, `/achievements`, `/economy` read or earn coins. Defaults: 100 daily per rolling 24 hours; 10 per minute; maximum balance 1,000,000. `/pay +international_number amount` prepares a review. Only the same user in the same chat can `/pay confirm code` within two minutes; amounts are whole coins 1-10000. Confirmation is consumed once, and persisted message IDs prevent repeated mutation after restart. Transfers have a persisted two-second cooldown and a maximum of 100 per UTC day. Reward and transfer commands refuse stale deliveries older than five minutes. Recipient numbers are explicit; quoted users or unrelated mentions never replace them. Phone-number identities only; unverified LIDs are refused rather than treated as phone numbers. Leaderboards use hashed pseudonyms, not phone numbers.
 
@@ -267,4 +356,16 @@ Atomic JSON transactions replace unreliable native SQLite on this host. Economy 
 
 Central command failures get sanitized classes and reference IDs. `/errors` is owner/sudo-only, private-chat-only, and reports recent IDs plus per-plugin recurrence. Private diagnostics keep command name, time, safe error code and class, never message arguments, URLs, stack traces, phone numbers or keys. Safe retry is explicitly limited to pre-send idempotent HTTP reads, at most two attempts in the downloader and safe public HTML GET. Whole commands, sends, uncertain transfers, writes and group changes are never retried automatically. Some legacy plugins have their own error handlers; full migration remains open.
 
-Language registry and honest key-level coverage: [src/i18n/README.md](src/i18n/README.md). Every registered code is selectable; missing translations use English. Key-complete major-language locales and partial locale files are counted separately in coverage.json. A complete 164-key interface schema is not a claim that every legacy plugin reply is translated. The 100+ translated-schema target is still open. Language selections require a successful settings write; unreadable settings files are preserved, not silently reset.
+Language registry and honest key-level coverage: [src/i18n/README.md](src/i18n/README.md). Every registered code is selectable; missing translations use English. Key-complete major-language locales and partial locale files are counted separately in coverage.json. The core schema has 164 keys across 77 complete locale files; the separate runtime schema has 228 keys across 70 complete locale files (English plus 69 non-English). Neither count proves native fluency or full translation of every plugin. The 100+ translated-schema target is still open. Language selections require a successful settings write; unreadable settings files are preserved, not silently reset.
+
+## Downloads and image enhancement (v1.6.3)
+
+- `/ig <public link>`, `/fb <public link>` and `/x <public link>` alias `/instagram`, `/facebook`, `/twitter`. No login/private-content or live-stream route. Limits include 30 minutes, 480px video height, bounded size/time, structural checks and temp cleanup. Public IG/FB/X sample downloads passed real network/file probes during development. Actual user-facing WhatsApp file delivery for those social samples has not yet been verified. Site access and individual posts can still fail.
+- `/apk <name or package ID>` sends the recommended F-Droid APK for a unique exact match. Ambiguous names show numbered choices; reply with a number within two minutes in the same chat as the same sender. `/apksearch` searches, `/apkinfo` reads metadata, `/apkdownload` accepts a package ID or validated official F-Droid APK URL. No proprietary-app delivery, split APKs, installation, malware scan or signing-certificate verification. APK structure/package identity and computed SHA256 are checked. Local F-Droid download passed; owner search worked, but WhatsApp APK file delivery is not yet verified.
+- `/remini` (alias `/enhance`) and `/upscale` default to local Sharp resizing. `/sharpen` and `/denoise` are local. This is not AI face restoration. `/restore` requires a configured restoration provider.
+- Explicit external syntax: `/remini clipdrop 2 yes` on a static photo. External trials are owner-permission only and require per-photo disclosure confirmation. No silent provider fallback, credit topup or POST retry. Clipdrop upscales, not face-restores. Input: JPEG/PNG/WebP,10MiB,16MP; output:20MiB,4096px per side.
+- The code is live, but host Clipdrop execution is enabled with an owner-approved cap of99 attempted calls. Local Sharp remains the default; choose Clipdrop explicitly and confirm disclosure per photo. One separate bounded synthetic Clipdrop test succeeded (HTTP200,512x384JPEG,14572bytes); the response reported99credits left. That is a historical API report, not a live balance guarantee or proof of personal-photo quality. No personal photo was used.
+- Store the Clipdrop key privately in `.env`, never in source. `REMINI_CLIPDROP_ENABLED` and `REMINI_CLIPDROP_BUDGET` require explicit owner approval. `data/image-credit-budget.json` records attempted calls atomically before POST; failures/timeouts may consume credits. Preserve this file across restarts. The budget is local accounting, not the provider's live wallet.
+- PixelBin remains disabled pending retention/disclosure and credit approval; provider-hosted output can remain about30days. Replicate remains disabled pending separate paid approval. Clipdrop retention is unverified. Default `.env.example` disables all external adapters.
+
+See [download notes](docs/downloads-build-notes.md) and [image notes](docs/image-enhancement-notes.md) for checks and sources.
