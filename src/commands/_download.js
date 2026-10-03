@@ -90,7 +90,7 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
           f.size = st.size;
         }
 
-        for (const f of media.files) await sendMediaFile(ctx.sock, ctx.jid, f, ctx.msg, f.type === 'audio' ? '' : `✅ ${media.title}`);
+        for (const f of media.files){let progress;if(f.type==='video'){await ctx.reply('Full download complete. Preparing and checking the full WhatsApp-safe video. Slow videos can take several minutes on this host.');progress=setInterval(()=>ctx.reply('Still processing the full video. No partial video will be sent.').catch(()=>{}),60000);progress.unref();}try{await sendMediaFile(ctx.sock, ctx.jid, f, ctx.msg, f.type === 'audio' ? '' : `✅ ${media.title}`);}finally{clearInterval(progress);}}
         logger.info('File sent');
         return media;
       },
