@@ -1,3 +1,9 @@
+## 1.6.3
+
+- /remini local Sharp processing and gated Clipdrop/PixelBin/Replicate adapters, bounded images and durable attempt budgets. External providers disabled until configured and cleared.
+- Name-based APK numbered choices,2minute chat/sender selection and package-ID /apkdownload support.
+- Social formats with missing height metadata now supported, actual output duration/resolution verified and oversized videos downscaled.
+
 ## 1.6.2
 
 - Public Instagram, Facebook and Twitter/X video commands with strict post URLs, cookies disabled, queue and limits.

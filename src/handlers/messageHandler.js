@@ -1,3 +1,4 @@
+import {takeApkChoice} from '../commands/apk/selection.js';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { jidToNumber } from '../utils/helpers.js';
@@ -91,7 +92,8 @@ const text = extractText(msg.message);
       const who = jidToNumber(msg.key.participantAlt || msg.key.participant || '');
       await moderate(sock, msg, owners.includes(who));
     }
-    const parsed = parseCommand(text);
+    let parsed = parseCommand(text);
+    if(!parsed){const senderJid=kind==='self'?sock.user?.id||msg.key.remoteJid:senderOf(msg,kind);const choice=takeApkChoice(msg.key.remoteJid,jidToNumber(senderJid),text);if(choice)parsed={name:'apk',args:[choice.packageName]};}
     if (!parsed) return; // normal chatter and bare URLs are ignored
 
     const jid = msg.key.remoteJid;

@@ -1,6 +1,6 @@
 {
   "name": "jarvis-whatsapp-bot",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "Jarvis: a modular multifunctional WhatsApp bot (Baileys) with downloaders, AI, image tools and group management",
   "type": "module",
   "main": "src/index.js",
@@ -19,6 +19,7 @@
     "@vreden/youtube_scraper": "^1.2.9",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "adm-zip": "^0.6.1",
+    "axios": "^1.20.0",
     "bottleneck": "^2.19.5",
     "cheerio": "^1.2.0",
     "dayjs": "^1.11.23",
@@ -26,6 +27,7 @@
     "ffmpeg-static": "^5.3.0",
     "figlet": "^1.12.0",
     "file-type": "^20.5.0",
+    "form-data": "^4.0.6",
     "generate-password": "^1.7.1",
     "link-preview-js": "^3.2.0",
     "msedge-tts": "^2.0.8",
