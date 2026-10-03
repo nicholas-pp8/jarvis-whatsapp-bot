@@ -3,7 +3,9 @@ import axios from 'axios';
 import FormData from 'form-data';
 
 // Free, key-less public AI helpers (Hugging Face Spaces + Pollinations). Best effort: callers must handle errors.
-export class PublicAiError extends Error {}
+export class PublicAiError extends Error {
+  constructor(m) { super(m); this.quota = /quota|runs limit/i.test(String(m || '')); }
+}
 const MAX_BYTES = 12 * 1048576;
 const NET = { maxRedirects: 0, proxy: false };
 
@@ -33,7 +35,7 @@ function readSse(stream, signal) {
         const line = block.split('\n').find((l) => l.startsWith('data:'));
         if (!line) continue;
         let m; try { m = JSON.parse(line.slice(5)); } catch { continue; }
-        if (m.msg === 'process_completed') return m.success ? done(resolve, m.output) : done(reject, new PublicAiError(String(m.output?.error || 'space error').slice(0, 120)));
+        if (m.msg === 'process_completed') return m.success ? done(resolve, m.output) : done(reject, new PublicAiError(String(m.output?.error || 'space error').slice(0, 160)));
         if (m.msg === 'queue_full') return done(reject, new PublicAiError('queue full'));
       }
     });
@@ -144,3 +146,32 @@ export async function ocrImage(jpeg, opts = {}) {
   if (typeof t !== 'string') throw new PublicAiError('no text');
   return t.trim();
 }
+
+export const BLIP_HOST = 'https://tonyassi-blip-image-captioning-large.hf.space';
+export const FLORENCE_HOST = 'https://prithivmlmods-florence-2-image-caption.hf.space';
+export const ANIME_HOST = 'https://akhaliq-animeganv2.hf.space';
+export const DEPTH_HOST = 'https://depth-anything-depth-anything-v2.hf.space';
+export const CODEFORMER_HOST = 'https://sczhou-codeformer.hf.space';
+const up = (jpeg) => ({ upload: jpeg, name: 'photo.jpg', type: 'image/jpeg' });
+const fileOf = (x) => (x && (x.url || x.path) ? x : Array.isArray(x) ? x.map(fileOf).find(Boolean) : null);
+
+export async function captionImage(jpeg, opts = {}) {
+  const r = await gradioRun(BLIP_HOST, 2, [up(jpeg), 5, 20], opts);
+  const t = r.output?.data?.[0];
+  if (typeof t !== 'string' || !t.trim()) throw new PublicAiError('no caption');
+  return t.split('\n')[0].trim().replace(/^(araffe|arafed|araffes)\s+/i, '');
+}
+export async function describeImage(jpeg, opts = {}) {
+  const r = await gradioRun(FLORENCE_HOST, 1, [up(jpeg), 'Florence-2-base'], opts);
+  const t = r.output?.data?.[0];
+  if (typeof t !== 'string' || !t.trim()) throw new PublicAiError('no description');
+  return t.trim();
+}
+async function imageOut(r, idx = 0) {
+  const f = fileOf(r.output?.data?.[idx]);
+  if (!f) throw new PublicAiError('no output');
+  return r.fetch(f);
+}
+export async function animeImage(jpeg, opts = {}) { return imageOut(await gradioRun(ANIME_HOST, 2, [up(jpeg), 'Version 2'], opts)); }
+export async function depthImage(jpeg, opts = {}) { return imageOut(await gradioRun(DEPTH_HOST, 0, [up(jpeg)], opts), 1); }
+export async function restoreFace(jpeg, opts = {}) { return imageOut(await gradioRun(CODEFORMER_HOST, 0, [up(jpeg), true, true, true, 2, 0.5], opts)); }
