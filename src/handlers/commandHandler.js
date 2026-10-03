@@ -1,3 +1,4 @@
+import {ownerCommandContext} from '../utilities/owner.js';
 import {rt} from '../i18n/runtime.js';
 import {t} from '../i18n/index.js';import {replyFailure} from '../recovery/reply.js';
 import {permitted,fullAccess} from '../permissions/index.js';
@@ -80,6 +81,7 @@ export async function handleCommand(ctx, parsed) {
   if (config.ownerOnly && !fullAccess(ctx)) return;
   if(!await permitted(ctx,cmd))return ctx.reply(t(ctx,'permission',{level:rt(ctx,'role_'+(cmd.ownerOnly?'owner':cmd.requiredLevel||'user'))}));
 
+  ctx = ownerCommandContext(ctx,cmd);
   const now = Date.now();
   if (config.limits.cooldownMs && !ctx.isOwner) {
     const prev = lastUse.get(ctx.sender) || 0;

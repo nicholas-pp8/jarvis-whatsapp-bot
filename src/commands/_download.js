@@ -90,7 +90,8 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
           f.size = st.size;
         }
 
-        for (const f of media.files){let progress;if(f.type==='video'){await ctx.reply('Full download complete. Preparing and checking the full WhatsApp-safe video. Slow videos can take several minutes on this host.');progress=setInterval(()=>ctx.reply('Still processing the full video. No partial video will be sent.').catch(()=>{}),60000);progress.unref();}try{await sendMediaFile(ctx.sock, ctx.jid, f, ctx.msg, f.type === 'audio' ? '' : `✅ ${media.title}`);}finally{clearInterval(progress);}}
+        for (const f of media.files){let timer,state={phase:'preparing'};if(f.type==='video'){await ctx.reply('Full download complete. Preparing the full video. Processing limit:1hour per stage. Estimating from real progress; upload time depends on WhatsApp/network.');timer=setInterval(()=>{const eta=state.remainingSeconds===null||state.remainingSeconds===undefined?'estimating...':Math.ceil(state.remainingSeconds/60)+'min approximately for this stage';ctx.reply('Video '+state.phase+(state.percent!==null&&state.percent!==undefined?' '+state.percent+'%':'')+'. Remaining: '+eta+'. '+(state.phase==='converting'?'Full checking and upload follow.':state.phase==='checking'?'Upload follows.':'Upload time cannot yet be estimated.')+' No partial video will be sent.').catch(()=>{});},60000);timer.unref();}try{await sendMediaFile(ctx.sock,ctx.jid,f,ctx.msg,f.type==='audio'?'':`✅ ${media.title}`,{onProgress:p=>{state=p;}});}finally{clearInterval(timer);}}
+
         logger.info('File sent');
         return media;
       },

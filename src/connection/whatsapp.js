@@ -1,3 +1,4 @@
+import {bindPairedOwner} from '../permissions/paired-owner.js';
 import fs from 'node:fs/promises';
 import readline from 'node:readline';
 import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, useMultiFileAuthState } from '@whiskeysockets/baileys';
@@ -117,6 +118,7 @@ export async function startWhatsApp() {
       if (connectionState === 'connecting') logger.info('Connecting to WhatsApp…');
 
       if (connectionState === 'open') {
+        try { await bindPairedOwner(s,state.creds.me,config); } catch { config.ownerNumber=''; logger.error('Paired owner identity/save failed. Stopping; check auth storage and connected identity.');return shutdown(1); }
         connection(s,true);
         reconnectAttempts = 0;
         pairingAttempts = 0;

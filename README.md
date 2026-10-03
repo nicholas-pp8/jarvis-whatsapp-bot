@@ -237,7 +237,7 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env`: set `OWNER_NUMBER` (digits only, with country code, no plus) and optionally `PAIRING_NUMBER`.
+Edit `.env`: optionally set `PAIRING_NUMBER` (digits only, with country code, no plus), or enter it at the console prompt. The linked account becomes owner after authentication.
 
 ## Run
 
@@ -262,7 +262,7 @@ npm run check:panel
 npm start
 ```
 
-Panel startup command: `npm start`. Set `OWNER_NUMBER`/`PAIRING_NUMBER` in private `.env`. On a constrained host set `GROUP_STORAGE=json`. Configure the panel to restart the process after an unexpected exit. `npm ci` needs internet on first setup; package install normally supplies ffmpeg, but blocked downloads or an incompatible binary require a host ffmpeg and `FFMPEG_PATH`.
+Panel startup command: `npm start`. Set `PAIRING_NUMBER` in private `.env` (or answer the console prompt). Ownership binds to the authenticated paired account. On a constrained host set `GROUP_STORAGE=json`. Configure the panel to restart the process after an unexpected exit. `npm ci` needs internet on first setup; package install normally supplies ffmpeg, but blocked downloads or an incompatible binary require a host ffmpeg and `FFMPEG_PATH`.
 
 ### Python panel
 
@@ -423,14 +423,28 @@ The games extension uses one session manager for17new brain commands and10multip
 - New banks/prompts and help currently use English. Existing language menus fall back to command descriptions. Offline question banks are small reviewed sets, not live trivia feeds.
 - The owner selected JSON after an isolated better-sqlite3@13.0.3 host Node22.11.0 probe crashed with SIGSEGV11. No other SQLite driver installed. Existing optional dependency and old game-score file left alone.
 
-Downloaded videos are normalized centrally before WhatsApp delivery: H.264 baseline/yuv420p video, AAC stereo audio when present, MP4 faststart, dimensions bounded by configured height. Compatible H264/yuv420p videos are fully remuxed; incompatible audio alone is transcoded when possible, otherwise ultrafast video conversion is used. Conversion and full output decode are time-limited (15minutes each), one encoding thread, actual output size checked. Download commands send progress once per minute while preparing video. Bad/truncated output is rejected rather than sent. YouTube, Pinterest and public social downloads share this sender. This is not confirmation that every recipient handset plays the result; a live phone retest follows deployment.
+Downloaded videos are normalized centrally before WhatsApp delivery: H.264 baseline/yuv420p video, AAC stereo audio when present, MP4 faststart, dimensions bounded by configured height. Compatible H264/yuv420p videos are fully remuxed; incompatible audio alone is transcoded when possible, otherwise ultrafast video conversion is used. Conversion and full output decode are time-limited (1hour each), one encoding thread, actual output size checked. Download commands send progress once per minute while preparing video. Bad/truncated output is rejected rather than sent. YouTube, Pinterest and public social downloads share this sender. This is not confirmation that every recipient handset plays the result; a live phone retest follows deployment.
 
 ## Resource modes
 
 Owner-only `/power`, `/balanced`, `/save` persist in `data/performance-mode.json`; `/power status` (or either other command with `status`) reads the current mode. Balanced is the default on a new install. `/status` shows it.
 
 - Balanced: one queued media job, one FFmpeg/Sharp worker, no added delay. Sharp cache50MiB, capped16MiB on small hosts.
-- Power: up to two media jobs and two FFmpeg/Sharp workers, Sharp cache64MiB. Below512MiB host memory or one CPU quota, power remains one worker/job and16MiB cache to protect the host.
+- Power: configurable requested1-20media jobs (`/power 20`, default2), clamped by estimated host memory and CPU, and up to two FFmpeg/Sharp workers, Sharp cache64MiB. Budget reserves256MiB base plus256MiB per job, at most one media job per CPU core quota and20overall. Small hosts remain one worker/job and16MiB cache. This is an estimate, not a guarantee against OOM; complex jobs can need more RAM.
 - Save: one media job/worker,3second delay before each queued heavy job, Sharp cache disabled. It can reduce media working-set pressure, not guarantee a RAM limit.
 
-Modes affect queued downloads/image enhancement, central video preparation and global Sharp processing. They do not change provider quotas, image resolution, file limits, codec checks, full-file delivery, WhatsApp reconnect, games or group timers. Running work is not canceled when the mode changes. Changing mode does not allocate host RAM/CPU, increase Node heap or guarantee speed. Many commands remain light and unaffected. All video modes keep fast selective conversion and15minute conversion/decode caps so saver does not bring back the short full-song timeout. Performance is best-effort under host/provider limits. No paid provider retry or fallback.
+Modes affect queued downloads/image enhancement, central video preparation and global Sharp processing. They do not change provider quotas, image resolution, file limits, codec checks, full-file delivery, WhatsApp reconnect, games or group timers. Running work is not canceled when the mode changes. Changing mode does not allocate host RAM/CPU, increase Node heap or guarantee speed. Many commands remain light and unaffected. All video modes keep fast selective conversion and1hour conversion/decode caps so saver does not bring back the short full-song timeout. Performance is best-effort under host/provider limits. No paid provider retry or fallback.
+
+Power job counts are total queued-media concurrency across users, not a per-user grant. Existing per-user2job and waiting-queue10job limits still apply. Reducing the cap does not cancel running work; new starts wait until capacity is available. Power20 requires at least20CPU cores quota and roughly5.25GiB host memory under this estimate, and still needs real workload tuning.
+
+1080p requires MAX_VIDEO_HEIGHT=1080 in private host .env and restart. Transcoded1080p30 uses H264 level4.0; lower sources are not upscaled. Video progress displays actual FFmpeg stage percentage and remaining time from processed time/speed after it becomes available. Initial estimate and upload/network duration are unknown rather than guessed. Stage estimates exclude subsequent validation/upload and can change; no full-send delivery deadline is promised. One-hour caps apply separately to conversion and full decode; downloads keep their own existing limit.
+
+## Automatic paired owner
+
+After authenticated WhatsApp connection opens, the linked account phone ID and typed LID (when supplied by that same account credentials) are saved privately in auth/paired-owner.json with0600permissions. The current linked account becomes owner; manual OWNER_NUMBER is no longer needed for ownership after connection. PAIRING_NUMBER still selects which number to pair. The saved file is for persistence/inspection, never used by itself to grant authority: every connection rebinds from authenticated socket/credential identity. Owner binding/save failure stops startup rather than trusting old config. Re-pairing another account replaces the owner record from the new authenticated account. Owner /update remains self-chat-only; outgoing owner commands sent to other people do not become private operator actions. Inbound sudo DM rules stay unchanged. A forwarded ID, message text or unverified LID cannot assign ownership.
+
+## GitHub commit updates
+
+Jarvis links to nicholas-pp8/jarvis-whatsapp-bot main, checks hourly while online, and notifies the paired owner once per new source commit. Detection compares Git blob hashes against allowed local source, so a same-package-version commit is no longer ignored. No auto-install occurs on the timer. `/update check` previews; bare `/update` in an allowed private operator chat checks the current commit, verifies/stages source, applies it, then exits for panel/supervisor restart. Legacy `/update confirm <commit>` refuses if latest changed. Dependencies/optional dependencies/Node engine changes are announced but require manual tested deployment. Secrets/auth/data/binaries/lockfile/stable runner are never overwritten; unchanged/deleted source paths outside the safe updater scope are not removed. Public repo changes from whoever has repo write access are trusted release code; protect that account. GitHub outages/rate limits can delay alerts. Existing health rollback still restores failed source updates. Host must restart on clean exits; an embedding launcher must not reapply old source.
+
+Owner commands can originate in contacts or groups. Owner-only command output and internal `/status` reports are delivered only to the authenticated paired account self-chat, without quoting the public-origin message. Internal commands (including update, statistics, diagnostics and usage) get a private execution context; group-operation targets remain their original group. Normal media and group game replies retain their intended destination. Authorization remains unchanged: public commands do not become owner commands; `/update` additionally requires paired-owner authority. Sudo command output also goes to owner self-chat, not the requester.

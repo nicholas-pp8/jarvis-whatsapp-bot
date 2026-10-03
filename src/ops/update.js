@@ -18,13 +18,13 @@ export class Updater {
   const t=await this.getJSON(`https://api.github.com/repos/${REPO}/git/trees/${c.sha}?recursive=1`);if(t.truncated)throw new Error('Incomplete update tree');
   const p=t.tree.find(x=>x.path==='package.json'&&x.type==='blob'&&x.mode==='100644');if(!p)throw new Error('Missing package');
   const next=JSON.parse((await this.readBlob(p,c.sha)).toString()),old=JSON.parse(await fs.readFile(path.join(this.root,'package.json'),'utf8'));
-  if(!newer(next.version,old.version)){this.pending=null;return null;}if(!dependencyEqual(old,next))throw new Error('Dependency/runtime changes need a manual tested deployment.');
+  const entries=t.tree.filter(x=>allowed(x.path));let changed=false;for(const x of entries){let local;try{local=await fs.readFile(path.join(this.root,x.path));}catch(e){if(e.code!=='ENOENT')throw e;changed=true;continue;}const hash=crypto.createHash('sha1').update(Buffer.from('blob '+local.length+'\0')).update(local).digest('hex');if(hash!==x.sha)changed=true;}if(!changed){this.pending=null;return null;}const blockedReason=dependencyEqual(old,next)?null:'Dependency/runtime changes need a manual tested deployment.';
   const log=t.tree.find(x=>x.path==='CHANGELOG.md'&&x.type==='blob');const notes=log?(await this.readBlob(log,c.sha)).toString().slice(0,3000):String(c.commit?.message||'No changelog supplied').slice(0,1500);
-  return this.pending={sha:c.sha,version:next.version,notes,tree:t.tree,expires:Date.now()+600000};
+  return this.pending={sha:c.sha,version:next.version,notes,blockedReason,tree:t.tree,expires:Date.now()+600000};
  }
  async install(sha){
   if(this.busy)throw new Error('Update already running');if(!this.pending||this.pending.sha!==sha||Date.now()>this.pending.expires)throw new Error('Run /update again and confirm the displayed commit.');
-  this.busy=true;const target=this.pending,tx=path.join(this.data,'update-transaction');let created=false;
+  if(this.pending.blockedReason)throw new Error(this.pending.blockedReason);this.busy=true;const target=this.pending,tx=path.join(this.data,'update-transaction');let created=false;
   try{
    try{await fs.access(tx);throw new Error('Previous update is still pending');}catch(e){if(e.code!=='ENOENT')throw e;}
    const entries=target.tree.filter(x=>allowed(x.path));if(!entries.length||entries.length>512||entries.some(x=>x.type!=='blob'||!['100644','100755'].includes(x.mode)))throw new Error('Unsupported update tree');
