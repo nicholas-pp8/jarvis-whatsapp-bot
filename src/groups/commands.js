@@ -151,6 +151,20 @@ add('tagall', {
   },
 });
 
+add('hidetag', {
+  aliases: ['htag'], description: 'Send a message that silently mentions every member (admins)', usage: 'hidetag <text>', level: A,
+  async run(ctx, { meta, level }) {
+    const text = ctx.args.join(' ').slice(0, 1000);
+    if (!text) return ctx.reply(`Usage: ${P()}hidetag <text>`);
+    if (level < LEVEL.botAdmin) {
+      const wait = cooldown(`hidetag:${ctx.jid}`, 60_000);
+      if (wait) return ctx.reply(`Wait ${Math.ceil(wait / 1000)}s before using ${P()}hidetag again.`);
+    }
+    const ids = meta.participants.map((p) => p.id).slice(0, 1024);
+    await out.schedule(() => ctx.sock.sendMessage(ctx.jid, { text, mentions: ids }));
+  },
+});
+
 add('warn', {
   description: 'Warn a member (admins)', usage: 'warn @person [reason]', level: A,
   async run(ctx, g) {
