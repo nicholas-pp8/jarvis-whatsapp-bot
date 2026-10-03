@@ -1,3 +1,4 @@
+import {resolveSenderIdentity,ownerIdentity} from '../permissions/sender-identity.js';
 import {takeApkChoice} from '../commands/apk/selection.js';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
@@ -97,10 +98,10 @@ const text = extractText(msg.message);
     if (!parsed) return; // normal chatter and bare URLs are ignored
 
     const jid = msg.key.remoteJid;
-    const senderJid = kind === 'self' ? sock.user?.id || jid : senderOf(msg, kind);
-    const sender = jidToNumber(senderJid);
+    const identity = await resolveSenderIdentity(sock,msg,kind);
+    const senderJid = identity.senderJid;
+    const sender = identity.phoneNumber || jidToNumber(senderJid);
     if (kind === 'self') msg.fromOwnPhone = true;
-    const ownerNumbers = [config.ownerNumber, jidToNumber(sock.user?.id || '')].filter(Boolean);
     const ctx = {
       sock,
       msg,
@@ -110,7 +111,7 @@ const text = extractText(msg.message);
       text,
       args: [],
       isGroup: jid.endsWith('@g.us'),
-      isOwner: kind === 'self' || ownerNumbers.includes(sender) || ownerNumbers.includes(jidToNumber(msg.key.remoteJidAlt || '')),
+      isOwner: ownerIdentity(identity,kind,config.ownerNumber,sock.user?.id || ''),
       commands: registry,
       reply: (content) => sock.sendMessage(jid, { text: content }, { quoted: msg }),
     };

@@ -1,3 +1,8 @@
+## 1.6.4
+
+- Resolve WhatsApp LID senders through Baileys phone-number mapping before owner-only command checks. Unmapped LIDs fail closed; group checks use the participant identity.
+- Five added identity tests; 145 tests pass. Live owner photo delivery still needs verification.
+
 ## 1.6.3
 
 - /remini local Sharp processing and gated Clipdrop/PixelBin/Replicate adapters, bounded images and durable attempt budgets. External providers disabled until configured and cleared.
