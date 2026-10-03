@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';import {prepareWhatsAppVideo} from './whatsappVideo.js';
 import {fileTypeFromFile} from 'file-type';
 import config from '../config/config.js';
 
@@ -6,6 +7,8 @@ export async function sendMediaFile(sock, jid, file, quoted, caption = '') {
   const detected=await fileTypeFromFile(file.path);
   if(!detected||!['image/','video/','audio/'].some(p=>detected.mime.startsWith(p)))throw new Error('Downloaded content is unsupported or suspicious');
   if(file.type&&['image','video','audio'].includes(file.type)&&!detected.mime.startsWith(file.type+'/'))throw new Error('Downloaded media does not match its claimed type');
+  const originalPath=file.path;
+  if(file.type==='video')file=await prepareWhatsAppVideo(file);
   const source = { url: file.path }; // streamed from disk, not loaded into RAM
   let content;
   if (file.type === 'audio') {
@@ -20,5 +23,5 @@ export async function sendMediaFile(sock, jid, file, quoted, caption = '') {
   } else {
     content = { document: source, mimetype: file.mimetype || 'application/octet-stream', fileName: file.fileName || 'file', caption };
   }
-  return sock.sendMessage(jid, content, { quoted });
+  try{return await sock.sendMessage(jid, content, { quoted });}finally{if(file.type==='video'&&file.path!==originalPath)await fs.rm(file.path,{force:true});}
 }

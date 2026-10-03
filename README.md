@@ -376,3 +376,18 @@ See [download notes](docs/downloads-build-notes.md) and [image notes](docs/image
 `/remini codeformer 2 yes` and `/remini snapedit 2 yes` send only the chosen photo to that provider. Both default disabled and require configured free allowance. CodeFormer may consume daily ZeroGPU quota; small-image internal enlargement is normalized to the requested dimensions. SnapEdit uses4credits at2x,7at4x. No automatic image retry/fallback or paid upgrade. Existing Clipdrop remains separate.
 
 `/truecaller +919876543210 yes` sends one number to enabled Veriphone/IPQS/DataCrawler sources, keeps differing claims separate, and excludes exact addresses/emails/age/images. DataCrawler currently supports India only. Free caps are conservative lifetime reservations, no automatic renewal. Provider fees/availability can change; configure before use.
+
+### Combined games (JSON profiles)
+
+The games extension uses one session manager for17new brain commands and10multiplayer game types. Existing `/quiz`, `/jumble` (scramble), `/wordgame` (anagram) and solo `/ttt` remain; no duplicate game commands. `/ttt @player` adds multiplayer and `/leaderboard games` shows new-game XP without replacing the existing economy leaderboard.
+
+- `/games`, `/gamehelp`, `/gameprofile`, `/gamestats`, `/achievements`, `/streak`, `/dailychallenge`.
+- Solo: `/mathquiz medium`, then `/mathquiz answer 42`. `/wordle` and `/dailychallenge` share one daily claim per UTC day.
+- Challenge: `/connect4 @player`, `/accept SESSION`, `/move SESSION 4`, `/leavegame SESSION`. Group members are checked through live group metadata. Rock-paper-scissors choices are locked and submitted privately, not revealed before both are ready.
+- `/teamquiz` requires4/6/8players, alternate player order forms teams. `/reaction @player` waits for a random GO signal. Results use receipt order, not a measurement of human reaction time independent of network latency.
+- JSON `data/game-profiles.json`: atomic rename/fsync, hashed player IDs, scores/XP/stats/streaks/achievements, no money or credits. Corrupt storage blocks score writes and preserves the original file. One process only, not shared across servers. Hourly XP cap200/player, short cooldowns, repeat-answer protection.
+- Sessions are in memory and canceled by restart, with no automatic resume or XP. Profiles persist. Inactivity expires within a5second cleanup interval; invitations default60s, turns45s, solo questions60s. Memory recalls after5s, but the first message stays in WhatsApp history; this is a casual memory exercise, not cheat-proof competition.
+- New banks/prompts and help currently use English. Existing language menus fall back to command descriptions. Offline question banks are small reviewed sets, not live trivia feeds.
+- The owner selected JSON after an isolated better-sqlite3@13.0.3 host Node22.11.0 probe crashed with SIGSEGV11. No other SQLite driver installed. Existing optional dependency and old game-score file left alone.
+
+Downloaded videos are normalized centrally before WhatsApp delivery: H.264 baseline/yuv420p video, AAC stereo audio when present, MP4 faststart, dimensions bounded by configured height. Conversion and full output decode are time-limited (120seconds each), one encoding thread, actual output size checked. Bad/truncated output is rejected rather than sent. YouTube, Pinterest and public social downloads share this sender. This is not confirmation that every recipient handset plays the result; a live phone retest follows deployment.

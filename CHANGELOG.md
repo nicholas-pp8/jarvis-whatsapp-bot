@@ -82,3 +82,9 @@
 - TTS and voice list with 23 languages.
 - Profile-picture validation fixes.
 - Recover switches default ON, with explicit later OFF settings preserved.
+
+## Combined brain + multiplayer games
+- Shared sessions,17new brain commands,10multiplayer rule modules, invites/turns/timers/cleanup.
+- Preserve existing quiz/jumble/wordgame and solo TTT; extend TTT challenges and economy leaderboard with `games` argument.
+- Atomic JSON XP/profiles/streaks/achievements after owner-selected JSON fallback; native SQLite host probe SIGSEGV, not enabled.
+- Fix downloaded-video delivery: convert to H.264/AAC/yuv420p faststart MP4, decode-check and enforce actual post-conversion size before send; block corrupt files.

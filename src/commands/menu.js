@@ -79,7 +79,7 @@ export default {
       const cmds = all.filter((c) => c.category === s.cat).sort((a, b) => rank(a) - rank(b));
       if (!cmds.length) continue;
       const rows = cmds.map((c) => {
-        return [`${p}${sc(c.name)}`, sc(preference(ctx)==='eng'?(SHORT[c.name]||c.description):t(ctx,'desc_'+c.name))];
+        return [`${p}${sc(c.name)}`, sc(preference(ctx)==='eng'?(SHORT[c.name]||c.description):(t(ctx,'desc_'+c.name)==='desc_'+c.name?c.description:t(ctx,'desc_'+c.name)))];
       });
       const w = Math.max(...rows.map((r) => r[0].length)) + 2;
       lines.push(sc(t(ctx,'cat_'+s.cat)), '```', ...rows.map(([a, b]) => `${a.padEnd(w)}${b}`), '```', '');
