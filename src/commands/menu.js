@@ -35,6 +35,7 @@ const SHORT = {
   tts: 'text to voice', ttsvoices: 'voice list',
   announce: 'announcement', schedule: 'daily message', mute: 'admins only chat', unmute: 'open chat', botadmin: 'bot admins',
 };
+const NEW = ['truth', 'dare', 'tod', 'meme', 'short', 'remind', 'poll', 'imagine', 'aivideo', 'removebg', 'anime', 'depth', 'facefix', 'caption', 'describe', 'ocr', 'stt', 'translate', 'antiinvite', 'whitelist', 'welcomeimage'];
 const ORDER = ['menu', 'help', 'ping', 'play', 'video', 'pinterest', 'sticker', 'toimg', 'resize', 'compress', 'convert', 'ask', 'status'];
 const SC = { a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ', j: 'ᴊ', k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ǫ', r: 'ʀ', s: 'ꜱ', t: 'ᴛ', u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', y: 'ʏ', z: 'ᴢ' };
 const sc = (t) => String(t).toLowerCase().replace(/[a-z]/g, (ch) => SC[ch] || ch);
@@ -75,6 +76,8 @@ export default {
       const w0 = Math.max(...rows.map((r) => r[0].length)) + 2;
       lines.push(sc(t(ctx,'live')), '```', ...rows.map(([a, b]) => `${a.padEnd(w0)}${b}`), '```', '');
     } catch { /* stats are optional */ }
+    const fresh = NEW.filter((n) => all.some((c) => c.name === n));
+    if (fresh.length) lines.push(sc('✨ new'), fresh.map((n) => p + sc(n)).join('  '), '');
     for (const s of sections) {
       const cmds = all.filter((c) => c.category === s.cat).sort((a, b) => rank(a) - rank(b));
       if (!cmds.length) continue;
