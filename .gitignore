@@ -13,3 +13,4 @@ bin/yt-dlp*
 
 .runtime/
 __pycache__/
+/settings.js
