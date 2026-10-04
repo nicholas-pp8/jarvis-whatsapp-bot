@@ -10,6 +10,10 @@ const SECTIONS = [
   { cat: 'Downloaders', title: 'DOWNLOADERS' },
   { cat: 'Image', title: 'IMAGE' },
   { cat: 'AI', title: 'AI' },
+  { cat: 'Games', title: 'GAMES' },
+  { cat: 'Utilities', title: 'UTILITIES' },
+  { cat: 'Tools', title: 'TOOLS' },
+  { cat: 'Books', title: 'BOOKS' },
   { cat: 'Group', title: 'GROUP' },
   { cat: 'Recover', title: 'RECOVER' },
   { cat: 'WhatsApp', title: 'BOT' },
@@ -35,7 +39,6 @@ const SHORT = {
   tts: 'text to voice', ttsvoices: 'voice list',
   announce: 'announcement', schedule: 'daily message', mute: 'admins only chat', unmute: 'open chat', botadmin: 'bot admins',
 };
-const NEW = ['truth', 'dare', 'tod', 'meme', 'short', 'remind', 'poll', 'imagine', 'aivideo', 'removebg', 'anime', 'depth', 'facefix', 'caption', 'describe', 'ocr', 'stt', 'translate', 'antiinvite', 'whitelist', 'welcomeimage'];
 const ORDER = ['menu', 'help', 'ping', 'play', 'video', 'pinterest', 'sticker', 'toimg', 'resize', 'compress', 'convert', 'ask', 'status'];
 const SC = { a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ', j: 'ᴊ', k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ǫ', r: 'ʀ', s: 'ꜱ', t: 'ᴛ', u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', y: 'ʏ', z: 'ᴢ' };
 const sc = (t) => String(t).toLowerCase().replace(/[a-z]/g, (ch) => SC[ch] || ch);
@@ -76,8 +79,6 @@ export default {
       const w0 = Math.max(...rows.map((r) => r[0].length)) + 2;
       lines.push(sc(t(ctx,'live')), '```', ...rows.map(([a, b]) => `${a.padEnd(w0)}${b}`), '```', '');
     } catch { /* stats are optional */ }
-    const fresh = NEW.filter((n) => all.some((c) => c.name === n));
-    if (fresh.length) lines.push(sc('✨ new'), fresh.map((n) => p + sc(n)).join('  '), '');
     for (const s of sections) {
       const cmds = all.filter((c) => c.category === s.cat).sort((a, b) => rank(a) - rank(b));
       if (!cmds.length) continue;
@@ -85,7 +86,8 @@ export default {
         return [`${p}${sc(c.name)}`, sc(preference(ctx)==='eng'?(SHORT[c.name]||c.description):(t(ctx,'desc_'+c.name)==='desc_'+c.name?c.description:t(ctx,'desc_'+c.name)))];
       });
       const w = Math.max(...rows.map((r) => r[0].length)) + 2;
-      lines.push(sc(t(ctx,'cat_'+s.cat)), '```', ...rows.map(([a, b]) => `${a.padEnd(w)}${b}`), '```', '');
+      const ct = t(ctx, 'cat_' + s.cat);
+      lines.push(sc(ct === 'cat_' + s.cat ? s.title : ct), '```', ...rows.map(([a, b]) => `${a.padEnd(w)}${b}`), '```', '');
     }
     lines.push(LINE, sc(t(ctx,'menu_footer',{prefix:p})));
     await ctx.reply(lines.join('\n'));
