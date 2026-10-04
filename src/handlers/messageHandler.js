@@ -10,6 +10,8 @@ import { observe } from '../recover/index.js';
 import { attachGroups, groupsReady } from '../groups/index.js';
 import { moderate } from '../groups/moderation.js';
 import { maybeAutoReply } from '../autoreply/index.js';
+import { wordchainPlain } from '../commands/wordchain.js';
+import { getGame as wordchainActive } from '../fun/wordchain.js';
 
 const processed = new Set();
 const botSent = new Set(); // ids of messages this bot sent itself
@@ -96,6 +98,7 @@ const text = extractText(msg.message);
     }
     let parsed = parseCommand(text);
     if(!parsed){const senderJid=kind==='self'?sock.user?.id||msg.key.remoteJid:senderOf(msg,kind);const choice=takeApkChoice(msg.key.remoteJid,jidToNumber(senderJid),text);if(choice)parsed={name:'apk',args:[choice.packageName]};}
+    if (!parsed && kind === 'group' && wordchainActive(msg.key.remoteJid)) { const id = await resolveSenderIdentity(sock, msg, kind); await wordchainPlain({ sock, msg, jid: msg.key.remoteJid, sender: id.phoneNumber || jidToNumber(id.senderJid), text }); return; }
     if (!parsed) { if (kind === 'group' || kind === 'private') await maybeAutoReply(sock, msg, kind, text); return; } // normal chatter and bare URLs are ignored
 
     const jid = msg.key.remoteJid;
