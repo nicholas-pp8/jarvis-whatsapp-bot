@@ -9,6 +9,7 @@ import { cacheMessage } from '../utils/msgCache.js';
 import { observe } from '../recover/index.js';
 import { attachGroups, groupsReady } from '../groups/index.js';
 import { moderate } from '../groups/moderation.js';
+import { maybeAutoReply } from '../autoreply/index.js';
 
 const processed = new Set();
 const botSent = new Set(); // ids of messages this bot sent itself
@@ -95,7 +96,7 @@ const text = extractText(msg.message);
     }
     let parsed = parseCommand(text);
     if(!parsed){const senderJid=kind==='self'?sock.user?.id||msg.key.remoteJid:senderOf(msg,kind);const choice=takeApkChoice(msg.key.remoteJid,jidToNumber(senderJid),text);if(choice)parsed={name:'apk',args:[choice.packageName]};}
-    if (!parsed) return; // normal chatter and bare URLs are ignored
+    if (!parsed) { if (kind === 'group' || kind === 'private') await maybeAutoReply(sock, msg, kind, text); return; } // normal chatter and bare URLs are ignored
 
     const jid = msg.key.remoteJid;
     const identity = await resolveSenderIdentity(sock,msg,kind);
