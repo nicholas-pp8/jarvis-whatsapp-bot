@@ -12,7 +12,7 @@ export const PROVIDERS = [
     label: 'Gemini',
     type: 'gemini',
     keyEnv: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
-    models: () => (process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']),
+    models: () => (process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest']),
   },
   {
     id: 'groq',
@@ -81,6 +81,46 @@ async function httpJson(url, init, ms = 30000) {
   return json;
 }
 
+/** Gemini 2.5+/3.x: thinking off + 4096 output tokens (validated: full clean translations, finishReason STOP). */
+export function genConfig(model, temperature) {
+  const c = { maxOutputTokens: 4096, temperature };
+  if (/gemini-(2\.5|3)/.test(model)) c.thinkingConfig = { thinkingBudget: 0 };
+  return c;
+}
+
+/**
+ * Faithful translation through Gemini. Throws on no key, truncation (MAX_TOKENS) or empty output
+ * so callers can fall back. Returns { text, model }.
+ */
+export async function geminiTranslate(text, to, { from = '', note = '' } = {}) {
+  const p = configuredProviders().find((x) => x.id === 'gemini');
+  if (!p) { const e = new Error('no gemini key'); e.code = 'NO_KEYS'; throw e; }
+  const sys = `You are a professional translator. Translate the user's text${from ? ' from ' + from : ''} into ${to}. ` +
+    `Write ${to} in its native script only, with no romanized leftovers. Keep verse/line numbers and line breaks as given. ` +
+    'Translate faithfully and completely; do not summarize, explain or add commentary.' + (note ? ' ' + note : '');
+  let lastErr;
+  for (const model of p.models()) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const j = await httpJson(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': p.key },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: 'user', parts: [{ text }] }], generationConfig: genConfig(model, 0.2) }),
+      }, 60000);
+      const cand = j?.candidates?.[0];
+      const out = (cand?.content?.parts || []).map((x) => x.text || '').join('').trim();
+      if (cand?.finishReason === 'MAX_TOKENS') throw new Error('translation truncated');
+      if (!out) throw new Error('empty reply');
+      return { text: out, model };
+    } catch (err) {
+      lastErr = err;
+      logger.warn(`[ai] translate ${model} failed, status ${Number(err.status) || 0}`);
+      if (err.status === 401 || err.status === 403) break;
+    }
+  }
+  throw lastErr || new Error('translate failed');
+}
+
 async function callGemini(p, model, question) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const j = await httpJson(url, {
@@ -89,7 +129,7 @@ async function callGemini(p, model, question) {
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM(config.botName) }] },
       contents: [{ role: 'user', parts: [{ text: question }] }],
-      generationConfig: { maxOutputTokens: 700, temperature: 0.7 },
+      generationConfig: genConfig(model, 0.7),
     }),
   });
   const text = (j?.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('').trim();
