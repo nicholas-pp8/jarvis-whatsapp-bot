@@ -95,7 +95,7 @@ export async function handleCommand(ctx, parsed) {
   }
 
   if(['Utilities','Games','Permissions'].includes(cmd.category)){const key=ctx.sender;const prev=utilityUse.get(key)||0;if(now-prev<3000)return ctx.reply(t(ctx,'cooldown',{seconds:3}));utilityUse.set(key,now);if(utilityUse.size>5000)utilityUse.clear();}
-  ctx.args = parsed.args;
+  ctx.args = parsed.args; ctx.commandName = parsed.name;
   if ((cmd.minArgs || 0) > ctx.args.length) {
     return ctx.reply(t(ctx,'missing_input',{usage:t(ctx,'usage'),prefix:config.prefix,command:cmd.usage}));
   }
