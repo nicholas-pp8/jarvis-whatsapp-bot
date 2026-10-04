@@ -45,6 +45,10 @@ export function findMedia(msg) {
         return { type: type.replace('Message', ''), node: holder[type], message: { key, message: holder }, animated: !!holder[type].isAnimated || type === 'videoMessage' || holder[type].seconds > 0 };
       }
     }
+    if (holder.documentMessage && /^video\/|gif/.test(holder.documentMessage.mimetype || '')) {
+      const key = fromQuote ? cachedKey || { remoteJid: msg.key.remoteJid, id: ctxInfo.stanzaId, participant: ctxInfo.participant, fromMe: false } : msg.key;
+      return { type: 'video', node: holder.documentMessage, message: { key, message: holder }, animated: true };
+    }
     if (holder.documentMessage && /^image\//.test(holder.documentMessage.mimetype || '')) {
       const key = fromQuote ? cachedKey || { remoteJid: msg.key.remoteJid, id: ctxInfo.stanzaId, participant: ctxInfo.participant, fromMe: false } : msg.key;
       return { type: 'image', node: holder.documentMessage, message: { key, message: holder }, animated: false };
@@ -109,6 +113,7 @@ export function addStickerExif(webp, pack, author) {
   return out;
 }
 
+export const STICKER_LADDER = [{ fps: 12, q: 45, t: 8 }, { fps: 10, q: 35, t: 6 }, { fps: 8, q: 25, t: 5 }, { fps: 8, q: 15, t: 4 }];
 export async function toSticker(buf, { animated, pack = 'Jarvis', author = 'Rohan', crop = false }) {
   let webp;
   if (animated) {
@@ -117,8 +122,13 @@ export async function toSticker(buf, { animated, pack = 'Jarvis', author = 'Roha
       const inp = path.join(dir, 'in.bin');
       const out = path.join(dir, 'out.webp');
       await fs.writeFile(inp, buf);
-      await runFfmpeg(['-y', '-i', inp, '-t', '8', '-vf', "fps=12,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000,format=rgba", '-loop', '0', '-an', '-c:v', 'libwebp', '-lossless', '0', '-q:v', '45', '-compression_level', '4', out]);
-      webp = await fs.readFile(out);
+      const vf = (fps) => (crop ? `fps=${fps},scale=512:512:force_original_aspect_ratio=increase,crop=512:512,format=rgba` : `fps=${fps},scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000,format=rgba`);
+      // Size ladder: try the best look first, then lighter settings until it fits WhatsApp's ~900 KB sticker limit. One thread keeps RAM low.
+      for (const a of STICKER_LADDER) {
+        await runFfmpeg(['-y', '-threads', '1', '-i', inp, '-t', String(a.t), '-vf', vf(a.fps), '-loop', '0', '-an', '-c:v', 'libwebp', '-lossless', '0', '-q:v', String(a.q), '-compression_level', '4', out]);
+        webp = await fs.readFile(out);
+        if (webp.length <= 900 * 1024) break;
+      }
     } finally {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
