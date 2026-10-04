@@ -9,6 +9,7 @@ import {cleanupStaleJobs} from '../utils/fileManager.js';
 export const usage=new Usage(path.join(config.paths.data,'usage.json'));
 export const updater=new Updater(config.root,config.paths.data);
 export const reminders=new Reminders(path.join(config.paths.data,'reminders.json'),async(text,to)=>{if(!to)return notify(text);if(!online)return false;await socket.sendMessage(to,{text:'Jarvis\n'+text});return true;},()=>Date.now(),(text,to)=>rt(to?{senderJid:to,sender:to,jid:to,isGroup:false}:ownerContext(),'reminder_delivery',{text}));
+export const scheduled=new Reminders(path.join(config.paths.data,'scheduled-messages.json'),async(text,to)=>{if(!to||!online)return false;await socket.sendMessage(to,{text});return true;},()=>Date.now(),(text)=>text);
 let reminderTask=null;
 const health=new Health();let socket=null;let online=false;let pendingOffline=false;let running=false;let started=false;let timer=null;let healthTimer=null;
 const file=path.join(config.paths.data,'ops.json');let state={};try{state=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}
@@ -43,5 +44,5 @@ export async function tick(){if(running)return;running=true;try{
  const weekday=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',weekday:'long'}).format(new Date());
  if(online&&weekday==='Sunday'&&hour>=Math.min(23,Math.max(0,Number(process.env.OPS_REPORT_HOUR??10)))&&state.weekly!==today&&await notify(report(rt(ownerContext(),'title_weekly'),7))){state.weekly=today;save();}
  }finally{running=false;}}
-export function start(){if(started)return;started=true;reminderTask=cron.schedule('* * * * *',()=>reminders.tick().catch(()=>{}),{timezone:'Asia/Kolkata'});timer=setInterval(()=>tick().catch(()=>{}),60000);timer.unref?.();}
+export function start(){if(started)return;started=true;reminderTask=cron.schedule('* * * * *',()=>{reminders.tick().catch(()=>{});scheduled.tick().catch(()=>{});},{timezone:'Asia/Kolkata'});timer=setInterval(()=>tick().catch(()=>{}),60000);timer.unref?.();}
 export function stop(){reminderTask?.stop();reminderTask?.destroy();clearInterval(timer);clearTimeout(healthTimer);started=false;usage.flush();}
