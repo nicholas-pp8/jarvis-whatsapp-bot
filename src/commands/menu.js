@@ -3,6 +3,7 @@ import {fullAccess} from '../permissions/index.js';
 import {usage} from '../ops/index.js';
 import config from '../config/config.js';
 import { snapshot, istFull } from '../utils/botstats.js';
+import { EFFECTS } from '../fun/voicefx.js';
 import { formatBytes, formatDuration } from '../utils/helpers.js';
 
 const SECTIONS = [
@@ -15,6 +16,7 @@ const SECTIONS = [
   { cat: 'Tools', title: 'TOOLS' },
   { cat: 'Books', title: 'BOOKS' },
   { cat: 'Group', title: 'GROUP' },
+  { cat: 'Voice Change', title: 'VOICE CHANGE' },
   { cat: 'Recover', title: 'RECOVER' },
   { cat: 'WhatsApp', title: 'BOT' },
 ];
@@ -87,7 +89,11 @@ export default {
       });
       const w = Math.max(...rows.map((r) => r[0].length)) + 2;
       const ct = t(ctx, 'cat_' + s.cat);
-      lines.push(sc(ct === 'cat_' + s.cat ? s.title : ct), '```', ...rows.map(([a, b]) => `${a.padEnd(w)}${b}`), '```', '');
+      if (s.cat === 'Voice Change') for (const k of Object.keys(EFFECTS)) rows.push([`${p}${k}`, sc(EFFECTS[k].desc)]);
+      const w2 = Math.max(...rows.map((r) => r[0].length)) + 2;
+      lines.push(sc(ct === 'cat_' + s.cat ? s.title : ct), '```', ...rows.map(([a, b]) => `${a.padEnd(w2)}${b}`), '```');
+      if (s.cat === 'Voice Change') lines.push(`_Reply to a voice note with any effect, e.g. ${p}chipmunk. Custom: ${p}voicechanger custom pitch=5 echo=0.5_`);
+      lines.push('');
     }
     lines.push(LINE, sc(t(ctx,'menu_footer',{prefix:p})));
     await ctx.reply(lines.join('\n'));
