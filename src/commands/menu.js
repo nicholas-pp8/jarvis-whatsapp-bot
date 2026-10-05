@@ -89,9 +89,10 @@ export default {
       });
       const w = Math.max(...rows.map((r) => r[0].length)) + 2;
       const ct = t(ctx, 'cat_' + s.cat);
-      if (s.cat === 'Voice Change') for (const k of Object.keys(EFFECTS)) rows.push([`${p}${k}`, sc(EFFECTS[k].desc)]);
+      if (s.cat === 'Voice Change') { rows.length = 0; for (const k of Object.keys(EFFECTS)) rows.push([`${p}${k}`, sc(EFFECTS[k].desc)]); }
       const w2 = Math.max(...rows.map((r) => r[0].length)) + 2;
-      lines.push(sc(ct === 'cat_' + s.cat ? s.title : ct), '```', ...rows.map(([a, b]) => `${a.padEnd(w2)}${b}`), '```');
+      if (s.cat === 'Voice Change') lines.push(sc(ct === 'cat_' + s.cat ? s.title : ct), ...Object.keys(EFFECTS).map((k) => `${p}${k[0].toUpperCase()}${k.slice(1)}`));
+      else lines.push(sc(ct === 'cat_' + s.cat ? s.title : ct), '```', ...rows.map(([a, b]) => `${a.padEnd(w2)}${b}`), '```');
       if (s.cat === 'Voice Change') lines.push(`_Reply to a voice note with any effect, e.g. ${p}chipmunk. Custom: ${p}voicechanger custom pitch=5 echo=0.5_`);
       lines.push('');
     }
