@@ -24,6 +24,15 @@ export function renderProgress({ name, received, total, speed, kind, done }) {
   ].join('\n');
 }
 
+const PHASES = { preparing: 'Preparing video', converting: 'Converting video', checking: 'Checking video', uploading: 'Uploading' };
+export function renderStage(name, p = {}) {
+  const pct = Number.isFinite(p.percent) ? Math.max(0, Math.min(100, Math.floor(p.percent))) : null;
+  const filled = pct === null ? 0 : Math.round(pct / 5);
+  const bar = pct === null ? '[░░░░░░░░░░░░░░░░░░░░]' : `[${'█'.repeat(filled)}${'░'.repeat(20 - filled)}] ${pct}%`;
+  const eta = Number.isFinite(p.remainingSeconds) ? fmtEta(p.remainingSeconds) : 'calculating...';
+  return [`⚙️ ${PHASES[p.phase] || 'Processing'}`, `🎬 ${String(name || 'Video').slice(0, 80)}`, bar, `⏱️ ETA: ${eta}`, 'Upload follows automatically.'].join('\n');
+}
+
 /** Edits one chat message with live progress, at most once per intervalMs. Never throws. */
 export function createProgressMessage(ctx, kind, intervalMs = 3000) {
   let sent = null; let last = 0; let lastText = ''; let busy = false; let closed = false;
@@ -65,6 +74,13 @@ export function createProgressMessage(ctx, kind, intervalMs = 3000) {
     async text(t) {
       if (!sent) return;
       try { await ctx.sock.sendMessage(ctx.jid, { text: t, edit: sent.key }); lastText = t; } catch { /* best effort */ }
+    },
+    /** Live conversion stage: edits the same message, throttled. */
+    async stage(p) {
+      const now = Date.now();
+      if (busy || now - last < intervalMs) return;
+      last = now; busy = true;
+      try { await this.text(renderStage(state.name, p)); } finally { busy = false; }
     },
     close() { closed = true; },
   };
