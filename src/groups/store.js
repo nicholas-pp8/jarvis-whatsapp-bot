@@ -15,7 +15,11 @@ export const DEFAULTS = {
   goodbyeMsg: 'Goodbye {user} 👋',
   rules: '',
   warnLimit: 3,
-  warnAction: 'notify', // notify | kick
+  warnAction: 'notify', // notify | kick | mute
+  warnExpireDays: 30, // warnings older than this stop counting (0 = never)
+  muteHours: 6, // length of the 'mute' warn action
+  linkMode: 'all', // all | invites (antilink blocks every link or only group invites)
+  trusted: [], // member numbers exempt from auto-moderation
   floodLimit: 8, // messages ...
   floodWindow: 10, // ... per this many seconds
   spamRepeat: 3, // identical messages ...
@@ -106,6 +110,7 @@ class JsonStore {
   setSetting(gid, key, value) { (this.d.settings[gid] ||= {})[key] = value; this.save(); }
   addWarn(gid, user, by, reason) { this.d.warnings.push({ gid, user, by, reason, ts: Date.now() }); this.save(); return this.listWarns(gid, user).length; }
   listWarns(gid, user) { return this.d.warnings.filter((w) => w.gid === gid && w.user === user); }
+  pruneWarns(gid, user, cutoff) { const b = this.d.warnings.length; this.d.warnings = this.d.warnings.filter((w) => !(w.gid === gid && w.user === user && w.ts < cutoff)); if (b !== this.d.warnings.length) this.save(); }
   clearWarns(gid, user) { const b = this.d.warnings.length; this.d.warnings = this.d.warnings.filter((w) => !(w.gid === gid && w.user === user)); this.save(); return b - this.d.warnings.length; }
   warnTotal(gid) { return this.d.warnings.filter((w) => w.gid === gid).length; }
   bump(gid, user) { const g = (this.d.stats[gid] ||= {}); g[user] = (g[user] || 0) + 1; this.save(); }
