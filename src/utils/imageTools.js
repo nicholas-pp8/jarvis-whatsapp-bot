@@ -172,3 +172,11 @@ export function friendly(err, what) {
   if (err.message === 'STICKER_TOO_BIG') return '📦 That clip is too big for a sticker. Try a shorter one.';
   return `❌ Could not ${what}. Send or reply to a valid image.`;
 }
+
+/** True when the message replies to something whose media the bot cannot see (older than the bot's memory). */
+export function quotedMediaMissing(msg) {
+  const direct = unwrap(msg.message) || {};
+  const c = direct.extendedTextMessage?.contextInfo || direct.imageMessage?.contextInfo || direct.videoMessage?.contextInfo;
+  return !!c?.stanzaId && !findMedia(msg);
+}
+export const MISSING_MEDIA_HINT = "I can't see that photo anymore (it is older than my memory or I was offline). Please send it again with the command as its caption.";
