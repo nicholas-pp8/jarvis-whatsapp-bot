@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import jsQR from 'jsqr';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
-import {findMedia} from '../utils/imageTools.js';
+import {findMedia, quotedMediaMissing, MISSING_MEDIA_HINT} from '../utils/imageTools.js';
 import {check, extractUrl} from '../linksafe/index.js';
 async function qrFrom(ctx) {
   const media = findMedia(ctx.msg);
@@ -25,6 +25,7 @@ export default {
         const q = await qrFrom(ctx).catch(() => null);
         if (q) { fromQr = true; target = extractUrl(q) || (q.startsWith('http') ? q : null); if (!target) return ctx.reply('QR found, but it is not a web link:\n' + q.slice(0, 300)); }
       }
+      if (!target && quotedMediaMissing(ctx.msg)) return ctx.reply(MISSING_MEDIA_HINT);
       if (!target) { const quoted = ctx.quotedText || ctx.quoted?.text; target = extractUrl(quoted); }
       if (!target) return ctx.reply(`Send a link: ${config.prefix}linkcheck <link>\nOr reply to a QR photo / a message with a link.`);
       const r = await check(target);
