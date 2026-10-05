@@ -9,7 +9,7 @@ import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { sleep } from '../utils/helpers.js';
 import { handleMessage, trackOutgoing } from '../handlers/messageHandler.js';
-import { getCached } from '../utils/msgCache.js';
+import { getCached, cacheMessage } from '../utils/msgCache.js';
 import { observe, onRevokeKey } from '../recover/index.js';
 
 const MAX_PAIRING_ATTEMPTS = 3;
@@ -169,7 +169,7 @@ export async function startWhatsApp() {
   s.ev.on('messages.upsert', async ({ messages, type }) => {
     // Offline/history deliveries are only remembered for recovery, never run as commands.
     if (type !== 'notify') {
-      for (const msg of messages || []) observe(s, msg).catch(() => {});
+      for (const msg of messages || []) { cacheMessage(msg); observe(s, msg).catch(() => {}); }
       return;
     }
     for (const msg of messages) {
