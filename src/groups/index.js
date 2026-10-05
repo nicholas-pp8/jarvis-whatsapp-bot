@@ -12,7 +12,7 @@ const attached = new WeakSet();
 let ready = null;
 
 const pid = (p) => (typeof p === 'string' ? p : p?.id || p?.jid || '');
-const fill = (tpl, vars) => String(tpl).replace(/\{(user|name|group|count|rules|date)\}/g, (_, k) => vars[k === 'name' ? 'user' : k] ?? '');
+const fill = (tpl, vars) => String(tpl).replace(/\{(user|name|group|count|rules|date|desc|admins)\}/g, (_, k) => vars[k === 'name' ? 'user' : k] ?? '');
 
 async function onParticipants(sock, ev) {
   try {
@@ -32,14 +32,16 @@ async function onParticipants(sock, ev) {
     const defaultKey=action==='add'?'welcomeMsg':'goodbyeMsg';
     const configured=s[defaultKey];
     const tpl=configured===DEFAULTS[defaultKey]?t({jid:gid,isGroup:true,sender:'group-event'},action==='add'?'welcome_default':'goodbye_default'):configured;
-    const text = fill(tpl, { user: people.map((i) => `@${num(i)}`).join(' '), group: meta?.subject || 'the group', count: meta?.participants?.length ?? '', rules: s.rules || '', date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) });
+    const adminIds = /\{admins\}/.test(tpl) ? (meta?.participants || []).filter((p) => p.admin).map((p) => p.id).slice(0, 5) : [];
+    const adminTags = adminIds.map((i) => `@${num(i)}`).join(' ');
+    const text = fill(tpl, { user: people.map((i) => `@${num(i)}`).join(' '), group: meta?.subject || 'the group', count: meta?.participants?.length ?? '', rules: s.rules || '', desc: String(meta?.desc || '').slice(0, 300), admins: adminTags, date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) });
     if (action === 'add' && s.welcomeImage) {
       try {
         const url = await sock.profilePictureUrl(people[0], 'image');
-        if (url) return await out.schedule(() => sock.sendMessage(gid, { image: { url }, caption: text, mentions: people }));
+        if (url) return await out.schedule(() => sock.sendMessage(gid, { image: { url }, caption: text, mentions: [...people, ...adminIds] }));
       } catch { /* no profile picture: send text */ }
     }
-    await out.schedule(() => sock.sendMessage(gid, { text, mentions: people }));
+    await out.schedule(() => sock.sendMessage(gid, { text, mentions: [...people, ...adminIds] }));
   } catch (err) {
     logger.warn(`[groups] welcome/goodbye failed: ${String(err.message).slice(0, 100)}`);
   }
