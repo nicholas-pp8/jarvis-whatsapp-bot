@@ -16,12 +16,14 @@ const SECTIONS = [
   { cat: 'Tools', title: 'TOOLS' },
   { cat: 'Books', title: 'BOOKS' },
   { cat: 'Group', title: 'GROUP' },
+  { cat: 'Performance Mode', title: 'PERFORMANCE MODE' },
   { cat: 'Voice Change', title: 'VOICE CHANGE' },
   { cat: 'Recover', title: 'RECOVER' },
   { cat: 'WhatsApp', title: 'BOT' },
 ];
 const SHORT = {
   menu: 'all commands',
+  power: 'power mode: fastest, parallel media jobs', balanced: 'balanced mode: default', save: 'save mode: lowest RAM, slower',
   help: 'how to use',
   ping: 'speed check',
   video: 'video (MP4)',
