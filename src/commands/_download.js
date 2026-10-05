@@ -96,8 +96,7 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
           f.size = st.size;
         }
 
-        const say = (m) => (progress ? progress.text(m) : ctx.reply(m));
-        for (const f of media.files){let timer,state={phase:'preparing'};if(f.type==='video'){await say('Full download complete. Preparing the full video. Processing limit:1hour per stage. Estimating from real progress; upload time depends on WhatsApp/network.');timer=setInterval(()=>{const eta=state.remainingSeconds===null||state.remainingSeconds===undefined?'estimating...':Math.ceil(state.remainingSeconds/60)+'min approximately for this stage';say('Video '+state.phase+(state.percent!==null&&state.percent!==undefined?' '+state.percent+'%':'')+'. Remaining: '+eta+'. '+(state.phase==='converting'?'Full checking and upload follow.':state.phase==='checking'?'Upload follows.':'Upload time cannot yet be estimated.')+' No partial video will be sent.').catch(()=>{});},60000);timer.unref();}try{await sendMediaFile(ctx.sock,ctx.jid,f,ctx.msg,f.type==='audio'?'':`✅ ${media.title}`,{onProgress:p=>{state=p;}});}finally{clearInterval(timer);}}
+        for (const f of media.files){let first=true;try{await sendMediaFile(ctx.sock,ctx.jid,f,ctx.msg,f.type==='audio'?'':`✅ ${media.title}`,{onProgress:p=>{if(f.type!=='video')return;if(progress)progress.stage(p);else if(first){first=false;ctx.reply('Preparing the full video...').catch(()=>{});}}});}finally{}}
 
         logger.info('File sent');
         return media;
