@@ -116,7 +116,7 @@ class JsonStore {
   bump(gid, user) { const g = (this.d.stats[gid] ||= {}); g[user] = (g[user] || 0) + 1; this.save(); }
   topUsers(gid, n) { return Object.entries(this.d.stats[gid] || {}).map(([user, msgs]) => ({ user, msgs })).sort((a, b) => b.msgs - a.msgs).slice(0, n); }
   totals(gid) { const g = Object.values(this.d.stats[gid] || {}); return { users: g.length, msgs: g.reduce((a, b) => a + b, 0) }; }
-  addSchedule(gid, hhmm, text, by) { const id = this.d.nextSch++; this.d.schedules.push({ id, gid, hhmm, text, by, last_day: null }); this.save(); return id; }
+  addSchedule(gid, hhmm, text, by, opts = {}) { const id = this.d.nextSch++; this.d.schedules.push({ id, gid, hhmm, text, by, last_day: null, dow: opts.dow || null, date: opts.date || null }); this.save(); return id; }
   listSchedules(gid) { return this.d.schedules.filter((s) => !gid || s.gid === gid); }
   delSchedule(gid, id) { const b = this.d.schedules.length; this.d.schedules = this.d.schedules.filter((s) => !(s.id === id && s.gid === gid)); this.save(); return b - this.d.schedules.length; }
   markSchedule(id, day) { const s = this.d.schedules.find((x) => x.id === id); if (s) { s.last_day = day; this.save(); } }
