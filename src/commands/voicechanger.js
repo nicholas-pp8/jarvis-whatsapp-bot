@@ -13,7 +13,8 @@ const BASE = ['voicechanger', 'vc', 'voicefx', 'changevoice'];
 const DIRECT = [...new Set(Object.entries(EFFECTS).flatMap(([k, v]) => [k, ...v.aliases]))];
 
 const stamps = new Map();
-const MAX_BYTES = 8 * 1048576;
+const MAX_BYTES = 40 * 1048576;
+const MAX_SECONDS = 30 * 60;
 export default {
   name: 'voicechanger', aliases: ['vc', 'voicefx', 'changevoice', ...DIRECT], category: 'Voice Change',
   description: COUNT + ' voice effects + custom mode (reply to a voice note)',
@@ -39,8 +40,8 @@ export default {
     }
     const a = findAudio(ctx.msg);
     if (!a) return ctx.reply('Reply to a voice note or audio with ' + p + 'voicechanger ' + effect);
-    if (Number(a.node.fileLength) > MAX_BYTES) return ctx.reply('Audio is too big (max 8MB).');
-    if (Number(a.node.seconds) > 120) return ctx.reply('Audio is too long (max 2 minutes; only the first 60 seconds are changed).');
+    if (Number(a.node.fileLength) > MAX_BYTES) return ctx.reply('Audio is too big (max 40MB).');
+    if (Number(a.node.seconds) > MAX_SECONDS) return ctx.reply('Audio is too long (max 30 minutes).');
     const now = Date.now();
     const mine = (stamps.get(ctx.sender) || []).filter((t) => now - t < 60000);
     if (mine.length >= 3) return ctx.reply('Limit: 3 voice changes per minute. Try again shortly.');
@@ -51,9 +52,9 @@ export default {
         dir = await createJobDir();
         const inp = path.join(dir, 'in.audio'), out = path.join(dir, 'out.ogg');
         const buf = await downloadMediaMessage(a.message, 'buffer', {}, {logger, reuploadRequest: ctx.sock.updateMediaMessage});
-        if (!buf?.length || buf.length > MAX_BYTES) return ctx.reply('Audio is too big (max 8MB).');
+        if (!buf?.length || buf.length > MAX_BYTES) return ctx.reply('Audio is too big (max 40MB).');
         await fs.writeFile(inp, buf);
-        try { const fo = {ffmpeg: config.tools?.ffmpeg || 'ffmpeg'}; if (filter) await runFfmpeg(inp, out, filter, fo); else await applyEffect(inp, out, effect, fo); }
+        try { const secs = Math.max(1, Math.min(MAX_SECONDS, Number(a.node.seconds) || 60)); const fo = {ffmpeg: config.tools?.ffmpeg || 'ffmpeg', maxSeconds: MAX_SECONDS, timeoutMs: Math.min(25 * 60000, 60000 + secs * 1000)}; if (filter) await runFfmpeg(inp, out, filter, fo); else await applyEffect(inp, out, effect, fo); }
         catch (e) { logger.warn('voicechanger failed: ' + (e?.message || 'error')); return ctx.reply('Could not read or change that audio.'); }
         await ctx.sock.sendMessage(ctx.jid, {audio: await fs.readFile(out), mimetype: 'audio/ogg; codecs=opus', ptt: true}, {quoted: ctx.msg});
       });
