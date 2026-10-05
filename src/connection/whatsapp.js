@@ -1,3 +1,4 @@
+import { getPollMessage, applyUpdates as applyPollUpdates, resume as resumePolls } from '../polls/index.js';
 import {bindPairedOwner} from '../permissions/paired-owner.js';
 import fs from 'node:fs/promises';
 import readline from 'node:readline';
@@ -90,10 +91,11 @@ export async function startWhatsApp() {
     syncFullHistory: false,
     generateHighQualityLinkPreview: false,
     // Lets WhatsApp re-send messages we could not decrypt the first time (needed for full media delivery).
-    getMessage: async (key) => getCached(key?.id)?.message,
+    getMessage: async (key) => getCached(key?.id)?.message || getPollMessage(key?.id),
   });
   sock = s;
   trackOutgoing(s);
+  try { resumePolls(s); } catch { /* polls are optional */ }
 
   s.ev.on('creds.update', async () => {
     try {
@@ -157,6 +159,7 @@ export async function startWhatsApp() {
   s.ev.on('messages.update', async (updates) => {
     for (const u of updates || []) {
       try {
+        if (u?.update?.pollUpdates && u.key?.id) applyPollUpdates(u.key.id, u.update.pollUpdates);
         const stub = u?.update?.messageStubType;
         if ((stub === 1 || stub === 'REVOKE') && u.key?.id) await onRevokeKey(s, u.key);
       } catch (err) { logger.warn('Delete update failed:', err.message); }
