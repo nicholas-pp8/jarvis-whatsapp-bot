@@ -1,7 +1,9 @@
 // Scheduled group messages: "/schedule 09:00 text" posts every day at that time (bot timezone).
 import logger from '../utils/logger.js';
 import { store } from './store.js';
-import { out } from './limiter.js';
+import { out, admin as adminQ } from './limiter.js';
+import { dueReopens, clearReopen } from './timedmute.js';
+import { dropMeta } from './perms.js';
 
 const TZ = process.env.BOT_TZ || 'Asia/Calcutta';
 let cron = null;
@@ -19,6 +21,14 @@ async function tick(getSock) {
   try {
     const sock = getSock();
     if (!sock || !store()) return;
+    for (const gid of dueReopens()) {
+      clearReopen(gid);
+      try {
+        await adminQ.schedule(() => sock.groupSettingUpdate(gid, 'not_announcement'));
+        dropMeta(gid);
+        await out.schedule(() => sock.sendMessage(gid, { text: '🔓 Timed mute over. Everyone can send messages again.' }));
+      } catch (e) { logger.warn(`[groups] auto-unmute failed: ${String(e.message).slice(0, 80)}`); }
+    }
     const { hhmm, day } = nowParts();
     for (const s of store().listSchedules()) {
       if (s.hhmm !== hhmm || s.last_day === day) continue;
