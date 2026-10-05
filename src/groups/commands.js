@@ -8,6 +8,8 @@ import { store, settings, DEFAULTS } from './store.js';
 import { out, admin as adminQ, rateLimited, cooldown } from './limiter.js';
 import { getMeta, dropMeta, findMember, botMember, isAdminP, levelOf, levelOfMember, num, LEVEL, LEVEL_NAME } from './perms.js';
 import { validTime, normTime } from './scheduler.js';
+import { topUsers as topWeek, dailyTotals, busiestHour, trackingStart } from './activity.js';
+import { parseDuration, setReopen, clearReopen } from './timedmute.js';
 
 const P = () => config.prefix;
 const onoff=(ctx,v)=>rt(ctx,v?'state_on':'state_off');
@@ -269,6 +271,23 @@ add('setrules', {
   },
 });
 
+function extraMentions(gid, meta) {
+  return topWeek(gid, 7, 3).map((u) => meta.participants.find((p) => num(p.id) === u.user)?.id).filter(Boolean);
+}
+function extraStats(gid, meta) {
+  void meta;
+  const wk = topWeek(gid, 7, 3); const days = dailyTotals(gid, 7); const bh = busiestHour(gid);
+  if (!wk.length && !days.some((x) => x.msgs)) return [];
+  const bar = days.map((x) => x.msgs);
+  const max = Math.max(...bar, 1);
+  const spark = bar.map((v) => '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor((v / max) * 7))]).join('');
+  const out = ['', `📈 *Last 7 days*: ${bar.reduce((a, b) => a + b, 0)} msgs  ${spark}`];
+  if (wk.length) out.push(...wk.map((u, i) => `${i + 1}. @${u.user} (${u.msgs})`));
+  if (bh !== null) out.push(`🕒 Busiest hour: ${String(bh).padStart(2, '0')}:00`);
+  void trackingStart;
+  return out;
+}
+
 add('groupstats', {
   aliases: ['gstats'], description: 'Message counts and top members', usage: 'groupstats',
   async run(ctx, { meta, st }) {
@@ -277,8 +296,8 @@ add('groupstats', {
     const names = top.map((u, i) => `${i + 1}. @${u.user} (${u.msgs})`);
     const mentions = top.map((u) => meta.participants.find((p) => num(p.id) === u.user)?.id).filter(Boolean);
     await ctx.sock.sendMessage(ctx.jid, {
-      text: [`📊 *${meta.subject}*`, rt(ctx,'members_count',{count:meta.participants.length}), rt(ctx,'message_counts',{messages:t.msgs,people:t.users}), rt(ctx,'warning_count',{count:st.warnTotal(ctx.jid)}), '', names.length ? rt(ctx,'top_talkers') + names.join('\n') : rt(ctx,'no_activity')].join('\n'),
-      mentions,
+      text: [`📊 *${meta.subject}*`, rt(ctx,'members_count',{count:meta.participants.length}), rt(ctx,'message_counts',{messages:t.msgs,people:t.users}), rt(ctx,'warning_count',{count:st.warnTotal(ctx.jid)}), '', names.length ? rt(ctx,'top_talkers') + names.join('\n') : rt(ctx,'no_activity')].concat(extraStats(ctx.jid, meta)).join('\n'),
+      mentions: [...mentions, ...extraMentions(ctx.jid, meta)],
     }, { quoted: ctx.msg });
   },
 });
@@ -363,10 +382,18 @@ add('schedule', {
 
 for (const [name, announce, desc] of [['mute', true, 'Only admins can send (admins)'], ['unmute', false, 'Everyone can send (admins)']]) {
   add(name, {
-    description: desc, usage: name, level: A, botAdmin: true,
+    description: desc, usage: name === 'mute' ? 'mute [30m|2h|1d]' : name, level: A, botAdmin: true,
     async run(ctx) {
+      const ms = announce && ctx.args[0] ? parseDuration(ctx.args[0]) : 0;
+      if (announce && ctx.args[0] && !ms) return ctx.reply(`Use a time like ${P()}mute 30m, ${P()}mute 2h or ${P()}mute 1d (1 min to 7 days).`);
       await adminQ.schedule(() => ctx.sock.groupSettingUpdate(ctx.jid, announce ? 'announcement' : 'not_announcement'));
       dropMeta(ctx.jid);
+      if (ms) {
+        setReopen(ctx.jid, Date.now() + ms);
+        const at = new Date(Date.now() + ms).toLocaleTimeString('en-IN', { timeZone: process.env.BOT_TZ || 'Asia/Calcutta', hour: '2-digit', minute: '2-digit', hour12: true });
+        return ctx.reply(rt(ctx,'group_muted') + `\n⏰ Reopens automatically at ${at}.`);
+      }
+      clearReopen(ctx.jid);
       await ctx.reply(announce ? rt(ctx,'group_muted') : rt(ctx,'group_unmuted'));
     },
   });
