@@ -21,12 +21,12 @@ export function detectPlatform(rawUrl) {
  * { title, files: [{ path, type, mimetype, fileName }] }.
  * `expect` restricts which platform a command accepts.
  */
-export async function fetchMedia(rawUrl, { dir, kind, expect }) {
+export async function fetchMedia(rawUrl, { dir, kind, expect, onProgress }) {
   const { url, downloader } = detectPlatform(rawUrl);
   if (!url) throw new DownloadError('❌ Please send a valid link starting with https://', { code: 'INVALID' });
   if (!downloader) throw new DownloadError('❌ That website is not supported yet.', { code: 'UNSUPPORTED' });
   if (expect && downloader.name !== expect) {
     throw new DownloadError(`❌ That is not a ${expect} link.`, { code: 'UNSUPPORTED' });
   }
-  return downloader.download(url, { dir, kind });
+  return downloader.download(url, { dir, kind, onProgress });
 }
