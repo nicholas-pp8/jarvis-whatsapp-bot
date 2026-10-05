@@ -30,6 +30,7 @@ const SHORT = {
   play: 'audio',
   pinterest: 'image/video',
   ask: 'ask any ai',
+  chat: 'ai chat mode', shazam: 'find song from clip', summary: 'chat recap', expense: 'split expenses', pollresult: 'poll results', autotranslate: 'live translate',
   sticker: 'image to sticker',
   toimg: 'sticker to image',
   resize: 'change width',
