@@ -111,7 +111,7 @@ test('getpp works, hides gracefully', async () => {
   await getpp.run(ctxFor(s, { args: ['919876543210'] }));
   assert.ok(s.sent.at(-1).c.image);
   await getpp.run(ctxFor(s, { args: ['999876543210'] }));
-  assert.match(s.sent.at(-1).c.text, /No profile picture/);
+  assert.match(s.sent.at(-1).c.text, /no profile picture/i);
   const other = ctxFor(s, { jid: '955@s.whatsapp.net', isOwner: false, msg: { key: { id: 'z', remoteJid: '955@s.whatsapp.net', fromMe: false }, message: {} } });
   await getpp.run(other);
   assert.equal(s.sent.at(-1).jid, '955@s.whatsapp.net');
