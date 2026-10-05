@@ -10,6 +10,8 @@ import { observe } from '../recover/index.js';
 import { attachGroups, groupsReady } from '../groups/index.js';
 import { moderate } from '../groups/moderation.js';
 import { maybeAutoReply } from '../autoreply/index.js';
+import { maybeChatMode } from '../chatmodes/index.js';
+import { record as logChat } from '../chatlog/index.js';
 import { wordchainPlain } from '../commands/wordchain.js';
 import { getGame as wordchainActive } from '../fun/wordchain.js';
 
@@ -97,9 +99,10 @@ const text = extractText(msg.message);
       await moderate(sock, msg, owners.includes(who));
     }
     let parsed = parseCommand(text);
+    if (!parsed && !msg.key.fromMe && text && (kind === 'group' || kind === 'private')) logChat(msg.key.remoteJid, msg.pushName || jidToNumber(senderOf(msg, kind)), text);
     if(!parsed){const senderJid=kind==='self'?sock.user?.id||msg.key.remoteJid:senderOf(msg,kind);const choice=takeApkChoice(msg.key.remoteJid,jidToNumber(senderJid),text);if(choice)parsed={name:'apk',args:[choice.packageName]};}
     if (!parsed && kind === 'group' && wordchainActive(msg.key.remoteJid)) { const id = await resolveSenderIdentity(sock, msg, kind); await wordchainPlain({ sock, msg, jid: msg.key.remoteJid, sender: id.phoneNumber || jidToNumber(id.senderJid), text }); return; }
-    if (!parsed) { if (kind === 'group' || kind === 'private') await maybeAutoReply(sock, msg, kind, text); return; } // normal chatter and bare URLs are ignored
+    if (!parsed) { if (kind === 'group' || kind === 'private') { if (await maybeChatMode(sock, msg, kind, text)) return; await maybeAutoReply(sock, msg, kind, text); } return; } // normal chatter and bare URLs are ignored
 
     const jid = msg.key.remoteJid;
     const identity = await resolveSenderIdentity(sock,msg,kind);
