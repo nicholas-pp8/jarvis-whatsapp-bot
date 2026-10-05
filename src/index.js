@@ -19,6 +19,7 @@ async function main() {
   await cleanupStaleJobs(0); // anything left in temp from a previous run is abandoned
   setInterval(() => cleanupStaleJobs(), 10 * 60 * 1000).unref();
   onError(recordError);startOps();
+  try { (await import('./dashboard/server.js')).startDashboard(registry); } catch (e) { logger.warn('[dashboard] not started: ' + e.message); }
   await startWhatsApp();
 }
 
