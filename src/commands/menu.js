@@ -30,7 +30,7 @@ const SHORT = {
   play: 'audio',
   pinterest: 'image/video',
   ask: 'ask any ai',
-  chat: 'ai chat mode', shazam: 'find song from clip', summary: 'chat recap', expense: 'split expenses', pollresult: 'poll results', linkcheck: 'scam link checker', trusted: 'automod exempt list', number: 'phone number lookup', readaloud: 'read pdf aloud', dashboard: 'owner web panel', autotranslate: 'live translate',
+  chat: 'ai chat mode', shazam: 'find song from clip', summary: 'chat recap', expense: 'split expenses', pollresult: 'poll results', linkcheck: 'scam link checker', trusted: 'automod exempt list', number: 'phone number lookup', readaloud: 'read pdf aloud', dashboard: 'owner web panel', confessions: 'confession box admin', autotranslate: 'live translate',
   sticker: 'image to sticker',
   toimg: 'sticker to image',
   resize: 'change width',
