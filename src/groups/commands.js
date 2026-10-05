@@ -7,7 +7,7 @@ import logger from '../utils/logger.js';
 import { store, settings, DEFAULTS } from './store.js';
 import { out, admin as adminQ, rateLimited, cooldown } from './limiter.js';
 import { getMeta, dropMeta, findMember, botMember, isAdminP, levelOf, levelOfMember, num, LEVEL, LEVEL_NAME } from './perms.js';
-import { validTime, normTime } from './scheduler.js';
+import { validTime, normTime, parseWhen, describeWhen } from './scheduler.js';
 import { topUsers as topWeek, dailyTotals, busiestHour, trackingStart } from './activity.js';
 import { parseDuration, setReopen, clearReopen } from './timedmute.js';
 
@@ -379,23 +379,25 @@ add('announce', {
 });
 
 add('schedule', {
-  description: 'Daily scheduled message (admins)', usage: 'schedule 09:00 text | list | del <id>', level: A,
+  description: 'Scheduled message: daily, weekly or one-time (admins)', usage: 'schedule [mon,fri|weekdays|2026-12-31] 09:00 text | list | del <id>', level: A,
   async run(ctx, g) {
     const sub = (ctx.args[0] || 'list').toLowerCase();
     if (sub === 'list') {
       const l = g.st.listSchedules(ctx.jid);
-      return ctx.reply(l.length ? rt(ctx,'schedule_heading') + l.map((x) => `#${x.id} ${x.hhmm} - ${x.text.slice(0, 60)}`).join('\n') : rt(ctx,'schedule_empty',{prefix:P()}));
+      return ctx.reply(l.length ? rt(ctx,'schedule_heading') + l.map((x) => `#${x.id} ${describeWhen(x)} - ${x.text.slice(0, 60)}`).join('\n') : rt(ctx,'schedule_empty',{prefix:P()}));
     }
     if (sub === 'del' || sub === 'delete') {
       const id = Number(ctx.args[1]);
       return ctx.reply(Number.isInteger(id) && g.st.delSchedule(ctx.jid, id) ? rt(ctx,'schedule_removed',{id}) : rt(ctx,'schedule_not_found'));
     }
-    if (!validTime(sub)) return ctx.reply(rt(ctx,'schedule_time_input',{prefix:P()}));
-    const text = ctx.text.replace(/^\S+\s+\S+\s*/, '').trim().slice(0, 1000);
+    const w = parseWhen(ctx.args);
+    if (!w) return ctx.reply(`Use: ${P()}schedule 09:00 text\n${P()}schedule mon,fri 18:30 text (or weekdays / weekends)\n${P()}schedule 2026-12-31 23:59 text (one time)`);
+    const text = w.rest.slice(0, 1000);
     if (!text) return ctx.reply(rt(ctx,'schedule_text_input'));
-    if (g.st.listSchedules(ctx.jid).length >= 5) return ctx.reply(rt(ctx,'schedule_limit'));
-    const id = g.st.addSchedule(ctx.jid, normTime(sub), text, num(ctx.senderJid));
-    await ctx.reply(rt(ctx,'schedule_saved',{id,time:normTime(sub),timezone:process.env.BOT_TZ||'Asia/Calcutta'}));
+    if (w.date && w.date + 'T' + w.hhmm < new Date().toLocaleString('sv-SE', { timeZone: process.env.BOT_TZ || 'Asia/Calcutta' }).replace(' ', 'T').slice(0, 16)) return ctx.reply('That date and time is already in the past.');
+    if (g.st.listSchedules(ctx.jid).length >= 10) return ctx.reply(rt(ctx,'schedule_limit'));
+    const id = g.st.addSchedule(ctx.jid, w.hhmm, text, num(ctx.senderJid), { dow: w.dow, date: w.date });
+    await ctx.reply(`✅ Scheduled #${id}: ${describeWhen({ ...w })} (${process.env.BOT_TZ || 'Asia/Calcutta'})`);
   },
 });
 
