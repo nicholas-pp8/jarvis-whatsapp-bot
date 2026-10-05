@@ -19,7 +19,7 @@ export function ownerChatJid(sock){
  if(!id?.endsWith('@s.whatsapp.net'))throw Error('Authenticated owner self-chat unavailable');
  return id;
 }
-const privateCommands=new Set(['update','system','usage','errors','listsudo','password','remind','truecaller']);
+const privateCommands=new Set(['number','update','system','usage','errors','listsudo','password','remind','truecaller']);
 /** Keep operation targets intact, but keep owner-command output out of contact/group chats. */
 export function ownerCommandContext(ctx,cmd){
  if(!cmd.ownerOnly&&cmd.name!=='status')return ctx;
