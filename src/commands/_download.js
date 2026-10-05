@@ -9,6 +9,7 @@ import { fetchMedia } from '../downloaders/index.js';
 import { DownloadError, downloadQueue } from '../utils/downloader.js';
 import { createJobDir, removeJobDir, freeDiskBytes } from '../utils/fileManager.js';
 import { sendMediaFile } from '../utils/sender.js';
+import { createProgressMessage } from '../utils/progressBar.js';
 import { bump } from '../database/database.js';
 import { formatBytes } from '../utils/helpers.js';
 
@@ -71,13 +72,18 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
       throw new DownloadError('💾 The server is low on disk space. Please try again later.', { code: 'DISK' });
     }
 
+    let progress = null;
     const result = await downloadQueue.add(
       ctx.sender,
       async () => {
         dir = await createJobDir();
         logger.info(`Download started (${label})`);
-        await ctx.reply(['instagram','facebook','twitter'].includes(expect)?'Downloading public '+expect+' video...':'⏳ '+t(ctx,'cat_Downloaders')+': '+t(ctx,'desc_'+(expect==='youtube'?(kind==='audio'?'play':'video'):'pinterest')));
-        const media = await fetchMedia(rawUrl, { dir, kind, expect });
+        if (expect === 'youtube') { progress = createProgressMessage(ctx, kind); await progress.begin(); }
+        else await ctx.reply(['instagram','facebook','twitter'].includes(expect)?'Downloading public '+expect+' video...':'⏳ '+t(ctx,'cat_Downloaders')+': '+t(ctx,'desc_'+(expect==='youtube'?(kind==='audio'?'play':'video'):'pinterest')));
+        let media;
+        try { media = await fetchMedia(rawUrl, { dir, kind, expect, onProgress: progress ? (p) => progress.update(p) : undefined }); }
+        catch (e) { progress?.close(); throw e; }
+        await progress?.finish(true);
         logger.info('Download completed');
 
         // File validation
@@ -90,7 +96,8 @@ export async function runDownloadCommand(ctx, { expect, kind, label }) {
           f.size = st.size;
         }
 
-        for (const f of media.files){let timer,state={phase:'preparing'};if(f.type==='video'){await ctx.reply('Full download complete. Preparing the full video. Processing limit:1hour per stage. Estimating from real progress; upload time depends on WhatsApp/network.');timer=setInterval(()=>{const eta=state.remainingSeconds===null||state.remainingSeconds===undefined?'estimating...':Math.ceil(state.remainingSeconds/60)+'min approximately for this stage';ctx.reply('Video '+state.phase+(state.percent!==null&&state.percent!==undefined?' '+state.percent+'%':'')+'. Remaining: '+eta+'. '+(state.phase==='converting'?'Full checking and upload follow.':state.phase==='checking'?'Upload follows.':'Upload time cannot yet be estimated.')+' No partial video will be sent.').catch(()=>{});},60000);timer.unref();}try{await sendMediaFile(ctx.sock,ctx.jid,f,ctx.msg,f.type==='audio'?'':`✅ ${media.title}`,{onProgress:p=>{state=p;}});}finally{clearInterval(timer);}}
+        const say = (m) => (progress ? progress.text(m) : ctx.reply(m));
+        for (const f of media.files){let timer,state={phase:'preparing'};if(f.type==='video'){await say('Full download complete. Preparing the full video. Processing limit:1hour per stage. Estimating from real progress; upload time depends on WhatsApp/network.');timer=setInterval(()=>{const eta=state.remainingSeconds===null||state.remainingSeconds===undefined?'estimating...':Math.ceil(state.remainingSeconds/60)+'min approximately for this stage';say('Video '+state.phase+(state.percent!==null&&state.percent!==undefined?' '+state.percent+'%':'')+'. Remaining: '+eta+'. '+(state.phase==='converting'?'Full checking and upload follow.':state.phase==='checking'?'Upload follows.':'Upload time cannot yet be estimated.')+' No partial video will be sent.').catch(()=>{});},60000);timer.unref();}try{await sendMediaFile(ctx.sock,ctx.jid,f,ctx.msg,f.type==='audio'?'':`✅ ${media.title}`,{onProgress:p=>{state=p;}});}finally{clearInterval(timer);}}
 
         logger.info('File sent');
         return media;
