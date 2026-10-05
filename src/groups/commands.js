@@ -304,7 +304,10 @@ add('groupstats', {
 
 const SETTABLE = {
   warnlimit: ['warnLimit', 'number', 1, 10],
-  warnaction: ['warnAction', ['notify', 'kick']],
+  warnaction: ['warnAction', ['notify', 'kick', 'mute']],
+  warnexpire: ['warnExpireDays', 'number', 0, 365],
+  mutehours: ['muteHours', 'number', 1, 72],
+  linkmode: ['linkMode', ['all', 'invites']],
   floodlimit: ['floodLimit', 'number', 3, 30],
   floodwindow: ['floodWindow', 'number', 3, 60],
   spamrepeat: ['spamRepeat', 'number', 2, 10],
@@ -348,6 +351,22 @@ add('groupconfig', {
     else { val = raw.toLowerCase(); if (!spec[1].includes(val)) return ctx.reply(rt(ctx,'setting_options',{setting:key,options:spec[1].join(', ')})); }
     g.st.setSetting(ctx.jid, spec[0], val);
     await ctx.reply(rt(ctx,'setting_saved',{setting:key,value:String(val).slice(0,200)}));
+  },
+});
+
+add('trusted', {
+  aliases: ['trust'], description: 'Members exempt from auto-moderation (admins)', usage: 'trusted add|remove|list @person', level: A,
+  async run(ctx, g) {
+    const sub = (ctx.args[0] || 'list').toLowerCase();
+    const cur = Array.isArray(g.s.trusted) ? g.s.trusted : [];
+    if (sub === 'list') return ctx.reply(cur.length ? 'Trusted members (skip anti-link/spam/flood/words):\n' + cur.map((n) => '+' + n).join('\n') : `No trusted members. Add one: ${P()}trusted add @person`);
+    if (!['add', 'remove'].includes(sub)) return ctx.reply(`Use: ${P()}trusted add @person | remove @person | list`);
+    const t = targetOf(ctx, g.meta);
+    if (!t?.member) return ctx.reply('Mention or reply to a member of this group.');
+    const n = num(t.member.id);
+    const next = sub === 'add' ? [...new Set([...cur, n])].slice(0, 50) : cur.filter((x) => x !== n);
+    g.st.setSetting(ctx.jid, 'trusted', next);
+    await ctx.reply(sub === 'add' ? `+${n} is now trusted (auto-moderation skips them).` : `+${n} removed from trusted.`);
   },
 });
 
