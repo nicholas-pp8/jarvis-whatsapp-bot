@@ -36,14 +36,14 @@ async function info(cleanUrl) {
  * @param {URL} url
  * @param {{kind:'video'|'audio', dir:string}} opts
  */
-export async function download(url, { kind, dir }) {
+export async function download(url, { kind, dir, onProgress }) {
   const clean = canonicalUrl(url);
   if (!clean) throw new DownloadError('❌ That does not look like a valid YouTube video link.', { code: 'INVALID' });
 
   const maxMb = Math.round(config.limits.maxFileBytes / 1024 / 1024);
   if (process.env.YT_PROVIDER !== 'ytdlp') {
     try {
-      return await downloadViaScraper(clean, { kind, dir });
+      return await downloadViaScraper(clean, { kind, dir, onProgress });
     } catch (e) {
       if (e.code === 'TOO_LARGE') throw e;
       logger.warn('[ytscraper] failed, falling back to yt-dlp');
