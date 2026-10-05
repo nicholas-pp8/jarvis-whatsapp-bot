@@ -2,6 +2,7 @@ import {rt} from '../i18n/runtime.js';
 // Optional auto-moderation. Every feature is OFF until a group admin turns it on.
 import validator from 'validator';
 import logger from '../utils/logger.js';
+import { record as recordActivity } from './activity.js';
 import { store, settings } from './store.js';
 import { out } from './limiter.js';
 import { getMeta, botMember, isAdminP, levelOf, findMember, num, LEVEL } from './perms.js';
@@ -34,15 +35,18 @@ export function textOf(message) {
   return (m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption || '').trim();
 }
 
+const STRIKE_WINDOW_MS = 45_000;
 async function strike(sock, msg, gid, memberId, reason, s, canDelete) {
   const st = store();
   if (canDelete) await out.schedule(() => sock.sendMessage(gid, { delete: msg.key })).catch((e) => logger.warn(`[groups] delete failed: ${String(e.message).slice(0, 80)}`));
   else logger.info("[groups] cannot delete (bot is not admin)");
-  const count = st.addWarn(gid, memberId, 'auto', reason);
   const key = `${gid}:${memberId}`;
   const last = notified.get(key) || 0;
-  if (Date.now() - last < 30_000) return;
+  // One burst = one strike: extra offending messages inside the window are only deleted.
+  if (Date.now() - last < STRIKE_WINDOW_MS) return;
+  if (notified.size > 5000) notified.clear();
   notified.set(key, Date.now());
+  const count = st.addWarn(gid, memberId, 'auto', reason);
   const ctx={jid:gid,isGroup:true,sender:memberId};const tag = `@${num(memberId)}`;
   const reasonText=rt(ctx,reason);
   let text = rt(ctx,'moderation_warning',{user:tag,reason:reasonText,count,limit:s.warnLimit});
@@ -74,6 +78,7 @@ export async function moderate(sock, msg, isOwner) {
     const member = findMember(meta, msg.key.participant, msg.key.participantAlt);
     const memberId = member?.id || sender;
     st.bump(gid, num(memberId));
+    recordActivity(gid, num(memberId));
 
     if (!(s.antilink || s.antiinvite || s.antispam || s.antiflood || s.badwords)) return;
     if (levelOf(sock, meta, msg, isOwner) >= LEVEL.groupAdmin) return; // admins are exempt
