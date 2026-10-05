@@ -15,6 +15,8 @@ const health=new Health();let socket=null;let online=false;let pendingOffline=fa
 const file=path.join(config.paths.data,'ops.json');let state={};try{state=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}
 function save(){try{fs.mkdirSync(config.paths.data,{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(state));fs.renameSync(file+'.tmp',file);}catch{}}
 const date=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+import {Capsules} from '../capsule/index.js';
+export const capsules=new Capsules(path.join(config.paths.data,'capsules.json'),async(text,to)=>{if(!to||!online)return false;await socket.sendMessage(to,{text});return true;},()=>Date.now(),(text)=>'📬 *Time capsule opened!*\n\n'+text);
 export function recordError(){health.error();}
 export function connection(sock,up){socket=sock;online=up;globalThis.__jarvisWA=up?'online':'offline';clearTimeout(healthTimer);if(up){healthTimer=setTimeout(()=>{if(online)healthy(config.paths.data).catch(()=>{});},30000);healthTimer.unref();}}
 function ownerContext(){return {senderJid:ownChat()||'',sender:ownChat()||'',jid:ownChat()||'',isGroup:false};}
@@ -44,5 +46,5 @@ export async function tick(){if(running)return;running=true;try{
  const weekday=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',weekday:'long'}).format(new Date());
  if(online&&weekday==='Sunday'&&hour>=Math.min(23,Math.max(0,Number(process.env.OPS_REPORT_HOUR??10)))&&state.weekly!==today&&await notify(report(rt(ownerContext(),'title_weekly'),7))){state.weekly=today;save();}
  }finally{running=false;}}
-export function start(){if(started)return;started=true;reminderTask=cron.schedule('* * * * *',()=>{reminders.tick().catch(()=>{});scheduled.tick().catch(()=>{});},{timezone:'Asia/Kolkata'});timer=setInterval(()=>tick().catch(()=>{}),60000);timer.unref?.();}
+export function start(){if(started)return;started=true;reminderTask=cron.schedule('* * * * *',()=>{reminders.tick().catch(()=>{});scheduled.tick().catch(()=>{});capsules.tick().catch(()=>{});},{timezone:'Asia/Kolkata'});timer=setInterval(()=>tick().catch(()=>{}),60000);timer.unref?.();}
 export function stop(){reminderTask?.stop();reminderTask?.destroy();clearInterval(timer);clearTimeout(healthTimer);started=false;usage.flush();}
