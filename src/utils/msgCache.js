@@ -6,7 +6,7 @@ import path from 'node:path';
 import { BufferJSON } from '@whiskeysockets/baileys';
 import config from '../config/config.js';
 
-const MAX = 150;
+const MAX = 400;
 const cache = new Map();
 const file = path.join(config.paths.data, 'media-cache.json');
 const unwrap = (m) => m?.ephemeralMessage?.message || m?.viewOnceMessage?.message || m?.viewOnceMessageV2?.message || m?.documentWithCaptionMessage?.message || m;
@@ -29,13 +29,22 @@ function scheduleSave() {
   timer.unref?.();
 }
 
+// Keep only what is needed to download the media again (thumbnails are the bulk of the size).
+function slim(m) {
+  const out = { ...m };
+  for (const t of ['imageMessage', 'videoMessage', 'stickerMessage', 'documentMessage']) {
+    if (out[t]) { out[t] = { ...out[t] }; delete out[t].jpegThumbnail; delete out[t].contextInfo; }
+  }
+  return out;
+}
+
 export function cacheMessage(msg) {
   try {
     const id = msg?.key?.id;
     const m = unwrap(msg?.message);
     if (!id || !m) return;
     if (!(m.imageMessage || m.videoMessage || m.stickerMessage || m.documentMessage || m.audioMessage)) return;
-    cache.set(id, { key: msg.key, message: m });
+    cache.set(id, { key: msg.key, message: slim(m) });
     if (cache.size > MAX) cache.delete(cache.keys().next().value);
     scheduleSave();
   } catch { /* cache is best effort */ }
