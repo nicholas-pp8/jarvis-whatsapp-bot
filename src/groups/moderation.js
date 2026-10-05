@@ -30,6 +30,15 @@ export function hasLink(text, whitelist = []) {
   return false;
 }
 
+/** Stable id for a media message (same file = same hash), so repeated stickers/images count as spam. */
+export function mediaKey(message) {
+  const m = message?.ephemeralMessage?.message || message?.viewOnceMessage?.message || message || {};
+  const n = m.stickerMessage || m.imageMessage || m.videoMessage || m.audioMessage || m.documentMessage;
+  const h = n?.fileSha256;
+  if (!h) return '';
+  return 'media:' + (Buffer.isBuffer(h) || h instanceof Uint8Array ? Buffer.from(h).toString('base64') : String(h));
+}
+
 export function textOf(message) {
   const m = message?.ephemeralMessage?.message || message?.viewOnceMessage?.message || message || {};
   return (m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption || '').trim();
@@ -103,7 +112,8 @@ export async function moderate(sock, msg, isOwner) {
     const k = `${gid}:${num(memberId)}`;
     const now = Date.now();
     const list = (recent.get(k) || []).filter((x) => now - x.t < 60_000);
-    list.push({ t: now, text });
+    const spamKey = text || mediaKey(msg.message);
+    list.push({ t: now, text: spamKey });
     recent.set(k, list);
     if (recent.size > 3000) recent.clear();
 
@@ -116,8 +126,8 @@ export async function moderate(sock, msg, isOwner) {
         return strike(sock, msg, gid, memberId, 'moderation_words', s, canDelete);
       }
     }
-    if (s.antispam && text) {
-      const same = list.filter((x) => x.text === text && now - x.t < s.spamWindow * 1000).length;
+    if (s.antispam && spamKey) {
+      const same = list.filter((x) => x.text === spamKey && now - x.t < s.spamWindow * 1000).length;
       if (same >= s.spamRepeat) return strike(sock, msg, gid, memberId, 'moderation_repeat', s, canDelete);
     }
     if (s.antiflood) {
