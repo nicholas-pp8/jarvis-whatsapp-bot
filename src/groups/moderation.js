@@ -46,6 +46,8 @@ async function strike(sock, msg, gid, memberId, reason, s, canDelete) {
   if (Date.now() - last < STRIKE_WINDOW_MS) return;
   if (notified.size > 5000) notified.clear();
   notified.set(key, Date.now());
+  const days = Number(s.warnExpireDays) || 0;
+  if (days > 0 && st.pruneWarns) st.pruneWarns(gid, memberId, Date.now() - days * 86400e3);
   const count = st.addWarn(gid, memberId, 'auto', reason);
   const ctx={jid:gid,isGroup:true,sender:memberId};const tag = `@${num(memberId)}`;
   const reasonText=rt(ctx,reason);
@@ -55,6 +57,11 @@ async function strike(sock, msg, gid, memberId, reason, s, canDelete) {
       await out.schedule(() => sock.groupParticipantsUpdate(gid, [memberId], 'remove')).catch((e) => logger.warn(`[groups] auto remove failed: ${e.message}`));
       st.clearWarns(gid, memberId);
       text = rt(ctx,'moderation_removed',{user:tag,limit:s.warnLimit});
+    } else if (s.warnAction === 'mute') {
+      const hours = Number(s.muteHours) || 6;
+      st.setSetting(gid, 'penalties', { ...(s.penalties || {}), [num(memberId)]: Date.now() + hours * 3600e3 });
+      st.clearWarns(gid, memberId);
+      text = `🔇 ${tag} reached ${s.warnLimit} warnings. Their messages will be removed for ${hours} h.`;
     } else {
       text = rt(ctx,'moderation_review',{user:tag,limit:s.warnLimit});
     }
@@ -80,10 +87,18 @@ export async function moderate(sock, msg, isOwner) {
     st.bump(gid, num(memberId));
     recordActivity(gid, num(memberId));
 
-    if (!(s.antilink || s.antiinvite || s.antispam || s.antiflood || s.badwords)) return;
-    if (levelOf(sock, meta, msg, isOwner) >= LEVEL.groupAdmin) return; // admins are exempt
+    const isAdminUser = levelOf(sock, meta, msg, isOwner) >= LEVEL.groupAdmin;
     const me = botMember(sock, meta);
     const canDelete = isAdminP(me);
+    // Members on a timed "mute" penalty (warnaction mute): their messages are removed until it ends.
+    const until = s.penalties?.[num(memberId)] || 0;
+    if (until && !isAdminUser) {
+      if (until > Date.now()) { if (canDelete) await out.schedule(() => sock.sendMessage(gid, { delete: msg.key })).catch(() => {}); return; }
+      const rest = { ...s.penalties }; delete rest[num(memberId)]; st.setSetting(gid, 'penalties', rest);
+    }
+    if (!(s.antilink || s.antiinvite || s.antispam || s.antiflood || s.badwords)) return;
+    if (isAdminUser) return; // admins are exempt
+    if (Array.isArray(s.trusted) && s.trusted.includes(num(memberId))) return; // trusted members are exempt
 
     const k = `${gid}:${num(memberId)}`;
     const now = Date.now();
@@ -93,7 +108,7 @@ export async function moderate(sock, msg, isOwner) {
     if (recent.size > 3000) recent.clear();
 
     if (s.antiinvite && /chat\.whatsapp\.com\/[A-Za-z0-9]+/i.test(text)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
-    if (s.antilink && hasLink(text, s.linkWhitelist)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
+    if (s.antilink && s.linkMode !== 'invites' && hasLink(text, s.linkWhitelist)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
     if (s.badwords) {
       const lower = text.toLowerCase();
       const words = st.words(gid);
