@@ -33,3 +33,21 @@ test('warn expiry prune + defaults', async () => {
   assert.equal(S.DEFAULTS.warnExpireDays, 30);
   assert.equal(S.DEFAULTS.linkMode, 'all');
 });
+test('schedule parsing and due logic', async () => {
+  const S = await import('../src/groups/scheduler.js');
+  assert.deepEqual(S.parseWhen(['9:05', 'hi', 'all']), { hhmm: '09:05', dow: null, date: null, rest: 'hi all' });
+  assert.deepEqual(S.parseWhen(['mon,fri', '18:30', 'x']).dow, [1, 5]);
+  assert.deepEqual(S.parseWhen(['weekends', '10:00', 'x']).dow, [0, 6]);
+  assert.equal(S.parseWhen(['2026-12-31', '23:59', 'ny']).date, '2026-12-31');
+  assert.equal(S.parseWhen(['nonsense', 'x']), null);
+  // 2026-10-05 is a Monday
+  assert.ok(S.dueNow({ hhmm: '09:00', dow: [1] }, '09:00', '2026-10-05'));
+  assert.ok(!S.dueNow({ hhmm: '09:00', dow: [2] }, '09:00', '2026-10-05'));
+  assert.ok(!S.dueNow({ hhmm: '09:00', date: '2026-10-06' }, '09:00', '2026-10-05'));
+  assert.ok(S.dueNow({ hhmm: '09:00' }, '09:00', '2026-10-05'));
+});
+test('media key for spam', async () => {
+  const { mediaKey } = await import('../src/groups/moderation.js');
+  assert.equal(mediaKey({ stickerMessage: { fileSha256: Buffer.from('abc') } }), 'media:YWJj');
+  assert.equal(mediaKey({ conversation: 'x' }), '');
+});
