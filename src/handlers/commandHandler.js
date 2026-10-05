@@ -10,6 +10,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import {usage} from '../ops/index.js';
+import {quotedMediaMissing,MISSING_MEDIA_HINT} from '../utils/imageTools.js';
+const QUOTED_MEDIA_CMDS=new Set(['sticker','toimg','removebg','resize','compress','ocr','animate','editimg','upscale','remini','restore','sharpen','denoise','facefix','depth','describe','ratemy','caption','anime']);
 import { recordCommand } from '../database/database.js';
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'commands');
@@ -99,6 +101,7 @@ export async function handleCommand(ctx, parsed) {
   if ((cmd.minArgs || 0) > ctx.args.length) {
     return ctx.reply(t(ctx,'missing_input',{usage:t(ctx,'usage'),prefix:config.prefix,command:cmd.usage}));
   }
+  if(QUOTED_MEDIA_CMDS.has(cmd.name)&&quotedMediaMissing(ctx.msg))return ctx.reply(MISSING_MEDIA_HINT);
   logger.info(`Command received: ${config.prefix}${cmd.name}`);
   recordCommand(cmd.name);
   usage.record(cmd.name,{owner:ctx.isOwner});
