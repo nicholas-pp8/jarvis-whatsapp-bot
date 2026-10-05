@@ -23,3 +23,13 @@ test('activity log', () => {
   assert.equal(A.lastSeen('g', 'a'), now);
   assert.ok(A.busiestHour('g') !== null);
 });
+test('warn expiry prune + defaults', async () => {
+  const S = await import('../src/groups/store.js');
+  await S.initStore();
+  const st = S.store();
+  st.addWarn('gx', 'u1', 'auto', 'r');
+  st.pruneWarns('gx', 'u1', Date.now() + 1000);
+  assert.equal(st.listWarns('gx', 'u1').length, 0);
+  assert.equal(S.DEFAULTS.warnExpireDays, 30);
+  assert.equal(S.DEFAULTS.linkMode, 'all');
+});
