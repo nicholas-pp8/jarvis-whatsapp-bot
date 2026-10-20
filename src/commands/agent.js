@@ -340,7 +340,19 @@ async function runInstallFlow(ctx, goal) {
   return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). After a self-test passes, Jarvis restarts and /' + cmdName + ' is live.\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
 }
 async function probeExports(pkg) {
-  const r = await shell.execShell('node -e "import(process.argv[1]).then(m=>{const ks=Object.keys(m);console.log(JSON.stringify({keys:ks.slice(0,25),hasDefault:!!m.default}))}).catch(e=>{console.log(JSON.stringify({probeError:String(e.message||e).slice(0,120)}))})" ' + JSON.stringify(pkg), { timeoutMs: 45000 });
+  const script = "const { createRequire } = await import('node:module');"
+    + "const req = createRequire(process.cwd() + '/x.js');"
+    + "let specs = [];"
+    + "try { const pj = req('./node_modules/' + process.argv[1] + '/package.json');"
+    + " specs = Object.keys(pj.exports || {}).filter(k => k !== './package.json' && !/nsfw/i.test(k)).map(k => k === '.' ? process.argv[1] : process.argv[1] + '/' + k.slice(2)); } catch {}"
+    + "if (!specs.includes(process.argv[1])) specs.unshift(process.argv[1]);"
+    + "const out = {};"
+    + "for (const s of specs.slice(0, 8)) {"
+    + " try { const m = await import(s); out[s] = { keys: Object.keys(m).slice(0, 25), hasDefault: !!m.default }; }"
+    + " catch (e) { out[s] = { probeError: String(e.message || e).slice(0, 120) }; }"
+    + "}"
+    + "console.log(JSON.stringify(out));";
+  const r = await shell.execShell('node --input-type=module -e "' + script + '" ' + JSON.stringify(pkg), { timeoutMs: 60000 });
   try { return JSON.parse((r.out || '').trim().split('\n').pop()); } catch { return {}; }
 }
 async function runInstallConfirmed(ctx, p) {
@@ -356,10 +368,18 @@ async function runInstallConfirmed(ctx, p) {
     shell.audit('INSTALL ' + pkg + ' rolled back: ' + why.slice(0, 120));
   };
   const exp = await probeExports(pkg);
-  shell.audit('INSTALL probe ' + pkg + ': ' + JSON.stringify(exp).slice(0, 150));
-  const expLine = exp.probeError
-    ? 'The package could not be probed (' + exp.probeError + '); be conservative and follow its README conventions.'
-    : 'The installed package\'s real top-level exports are: ' + (exp.keys && exp.keys.length ? exp.keys.join(', ') : '(none)') + '.' + (exp.hasDefault ? ' It HAS a default export.' : ' It has NO default export - use the named exports, e.g. const { Name } = await import(\'' + pkg + '\'); and construct/call as its docs describe.');
+  shell.audit('INSTALL probe ' + pkg + ': ' + JSON.stringify(exp).slice(0, 200));
+  const working = Object.entries(exp).filter(([, v]) => v && !v.probeError);
+  const broken = Object.entries(exp).filter(([, v]) => v && v.probeError);
+  if (Object.keys(exp).length && !working.length) {
+    const first = broken[0];
+    await rollback('no importable entry point: ' + (first ? first[0] + ' -> ' + first[1].probeError : 'probe failed'));
+    return ctx.reply('Installed ' + pkg + ' but its published code cannot be imported at all (broken package publication). ' + (first ? 'import(\'' + first[0] + '\') fails: ' + first[1].probeError : '') + ' Rolled back: package uninstalled, no command added. This needs a different package version or a hand-written command.');
+  }
+  const expLine = 'Real import probe of the installed package (run against the ACTUAL installed files):\n'
+    + working.map(([s, v]) => '- import(\'' + s + '\') WORKS. Its real exports: ' + (v.keys && v.keys.length ? v.keys.join(', ') : '(none)') + '.' + (v.hasDefault ? ' It HAS a default export.' : ' It has NO default export.')).join('\n')
+    + (broken.length ? '\n' + broken.map(([s, v]) => '- import(\'' + s + '\') FAILS (' + v.probeError + ') - NEVER import this specifier.').join('\n') : '')
+    + '\nOnly use import specifiers marked WORKS and only the exports listed for them. Never guess export names or deep file paths that are not listed.';
   await ctx.reply('Writing the /' + cmdName + ' command...');
   const bodyPrompt = 'Write ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function for a WhatsApp bot command named "/' + cmdName + '" using the npm package "' + pkg + '" (' + (desc || 'no description') + ').\n' + expLine + '\nOwner request: install ' + pkg + ' and provide /' + cmdName + '.\nRules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load the package inside the body with await import() using the REAL exports listed above.\n- ctx.args is the user\'s words as a string array (at least one is guaranteed); await ctx.reply(text) sends a plain reply; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, or files under auth/. No child_process, no shell, no writes outside /tmp.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and on failure reply with the actual error message (first 100 chars), never a generic "failed" message. Keep it under 30 lines.';
   const bodyProblem = (b) => {
