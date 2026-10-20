@@ -190,6 +190,12 @@ const text = extractText(msg.message);
         } catch { /* never block normal messages */ }
       }
     }
+    if (text && !msg.key.fromMe) {
+      try {
+        const sessions = await import('../utils/sessions.js');
+        if (sessions.has(msg.key.remoteJid) && await sessions.route(sock, msg, text)) return;
+      } catch { /* sessions never block normal messages */ }
+    }
     let parsed = parseCommand(text);
     if (!parsed && !msg.key.fromMe && text && (kind === 'group' || kind === 'private')) logChat(msg.key.remoteJid, msg.pushName || jidToNumber(senderOf(msg, kind)), text);
     if (!parsed && !msg.key.fromMe && text && (kind === 'group' || kind === 'private')) { try { if (featOn('memory')) { const { userMemory } = await import('../ops/index.js'); userMemory.learn(jidToNumber(senderOf(msg, kind)), text, msg.pushName); } } catch {} }

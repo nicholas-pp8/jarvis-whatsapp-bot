@@ -41,6 +41,24 @@ export function startDashboard(registry) {
   const srv = http.createServer(async (req, res) => {
     try {
       const u0 = new URL(req.url, 'http://x');
+      if (u0.pathname === '/healthz') { res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' }); return res.end('ok'); }
+      if (u0.pathname === '/agent-event' && req.method === 'POST') {
+        const tok = String(process.env.JARVIS_EVENT_TOKEN || '');
+        if (!tok || req.headers.authorization !== 'Bearer ' + tok) { res.writeHead(401); return res.end('Unauthorized'); }
+        const chunks = []; let n = 0;
+        for await (const c of req) { n += c.length; if (n > 2048) { res.writeHead(413); return res.end(); } chunks.push(c); }
+        let text = '';
+        try { text = String(JSON.parse(Buffer.concat(chunks).toString('utf8')).text || '').slice(0, 1000); } catch { /* invalid */ }
+        if (!text) { res.writeHead(400); return res.end('{"error":"missing text"}'); }
+        try {
+          const { getSock } = await import('../utilities/ownersock.js');
+          const s = getSock();
+          const own = String(config.ownerNumber).replace(/\D/g, '') + '@s.whatsapp.net';
+          if (!s) throw new Error('bot not connected');
+          await s.sendMessage(own, { text: '🔔 ' + text });
+          res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"ok":true}');
+        } catch (e) { res.writeHead(502); return res.end('{"error":"delivery failed"}'); }
+      }
       if (u0.pathname === '/telemetry') {
         const col = getCollector();
         if (!col || req.method !== 'POST') { res.writeHead(col ? 405 : 404); return res.end(); }

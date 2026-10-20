@@ -10,7 +10,9 @@ export function featureOn(name) {
   if (typeof o[name] === 'boolean') return o[name];
   return settings.features[name] !== false;
 }
+import fs from 'node:fs';
 export function commandOn(cmd) {
+  try { const f = JSON.parse(fs.readFileSync('data/command-flags.json', 'utf8')); if ((f.disabled || []).includes(cmd.name)) return false; } catch { /* no flags file */ }
   if ((settings.disabledCommands || []).includes(cmd.name)) return false;
   const k = featureKey(cmd);
   return !k || !(k in settings.features) || featureOn(k);

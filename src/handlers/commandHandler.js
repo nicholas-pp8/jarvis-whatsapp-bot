@@ -133,6 +133,7 @@ export async function handleCommand(ctx, parsed) {
     await cmd.run(ctx);
   } catch (err) {
     usage.record(cmd.name,{error:true});
+    try { const { logFailure } = await import('../utils/genregistry.js'); logFailure(cmd.name, err?.message || err); } catch { /* best effort */ }
     await replyFailure(ctx,cmd.name,err);
   }
 }

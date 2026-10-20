@@ -20,8 +20,35 @@ import * as agentqueue from '../utilities/agentqueue.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import cron from 'node-cron';
+import { loadGenerated, saveGenerated, noteGenerated, dropGenerated, getGenerated, archiveVersion, listVersions, versionPath, logFailure, readFailures, buildCommandFile } from '../utils/genregistry.js';
+import { pickTemplate } from '../utils/templates.js';
+import { buildKit, unpackKit } from '../utils/recovery.js';
+import * as sessions from '../utils/sessions.js';
 
 const SAFE = ['weather', 'news', 'ask', 'define', 'translate', 'wiki', 'time', 'stock', 'quote', 'lyrics'];
+
+// ---- Quota dashboard (estimates: counts /agent-side LLM calls, not provider-side quotas)
+const QUOTA_FILE = path.join('data', 'agent-quota.json');
+function quotaBump(field, feature) {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    let q = {};
+    try { q = JSON.parse(fs.readFileSync(QUOTA_FILE, 'utf8')); } catch {}
+    if (q.day !== day) q = { day, calls: 0, failures: 0, byFeature: {} };
+    q[field] = (q[field] || 0) + 1;
+    q.byFeature = q.byFeature || {};
+    q.byFeature[feature] = (q.byFeature[feature] || 0) + 1;
+    fs.mkdirSync('data', { recursive: true });
+    fs.writeFileSync(QUOTA_FILE, JSON.stringify(q));
+  } catch { /* best effort */ }
+}
+async function ai(prompt, opts, feature = 'general') {
+  quotaBump('calls', feature);
+  try { return await askAi(prompt, opts); }
+  catch (e) { quotaBump('failures', feature); throw e; }
+}
+// Shared codegen rules for install/builder/repair (bodies only, no imports).
+const CODEGEN_RULES = 'Rules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load packages inside the body with await import().\n- ctx.args is the user\'s words as a string array; await ctx.reply(text) sends a plain reply; ctx.sock and ctx.jid are available for media replies; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, or files under auth/. No child_process, no shell, no writes outside /tmp and data/.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and on failure reply starting with "Error: " followed by the actual error message (first 150 chars), never a generic "failed" message. Keep it under 30 lines.\n- For multi-turn conversations you may use the sessions helper: const S = await import(\'../utils/sessions.js\'); S.begin(ctx, { cmd: \'name\', ttlMs: 300000, state: {}, onText: async (sctx, text, end) => { /* handle each reply; call end() when done */ } }); sctx has reply, jid, state.';
 const MAX_STEPS = 5, MAX_GOAL = 300, MAX_ARG = 120, SH_STEPS = 15, SH_EXEC_CAP = 100;
 
 function resolveCmd(name) {
@@ -239,6 +266,11 @@ export async function handlePendingAnswer(ctx, isYes) {
   shell.clearPending();
   if (p.kind === 'install') return runInstallConfirmed(ctx, p);
   if (p.kind === 'update') return runUpdateConfirmed(ctx, p);
+  if (p.kind === 'msgjob') return runMessageJobConfirmed(ctx, p);
+  if (p.kind === 'template') return runTemplateConfirmed(ctx, p);
+  if (p.kind === 'apicmd') return runApiCmdConfirmed(ctx, p);
+  if (p.kind === 'restorecmd') return runRestoreCmdConfirmed(ctx, p);
+  if (p.kind === 'restore') return runRestoreConfirmed(ctx, p);
   await ctx.reply('Confirmed - taking a backup first, then running ' + (p.cmds.length + (p.restarts || 0)) + ' action(s)...');
   const { backup, results } = await shell.runStaged(p);
   lastRaw = { ts: Date.now(), text: results.map((r) => '$ ' + r.cmd + ' (exit ' + r.code + ')\n' + r.out).join('\n---\n') };
@@ -355,6 +387,14 @@ async function probeExports(pkg) {
   const r = await shell.execShell('node --input-type=module -e "' + script + '" ' + JSON.stringify(pkg), { timeoutMs: 60000 });
   try { return JSON.parse((r.out || '').trim().split('\n').pop()); } catch { return {}; }
 }
+function bodyProblem(b) {
+  if (!b) return 'the AI returned nothing';
+  if (/export\s+default|module\.exports/.test(b)) return 'it included export statements (inner statements only, no exports)';
+  if (/^\s*import\s/m.test(b)) return 'it used import statements (load the package with await import() inside the body instead)';
+  if (/\brequire\s*\(/.test(b)) return 'it used require() (use await import() inside the body instead)';
+  if (/process\.env|auth\/|auth-backup|\.env\b|child_process|\bexecSync\b|\bspawn\b/.test(b)) return 'it touched env/secrets/shell (not allowed)';
+  return null;
+}
 async function runInstallConfirmed(ctx, p) {
   const { pkg, version, cmdName, desc, finalFile } = p.install;
   const tmpFile = path.join('src', 'commands', '_newcmd-' + cmdName + '.js');
@@ -382,25 +422,17 @@ async function runInstallConfirmed(ctx, p) {
     + '\nOnly use import specifiers marked WORKS and only the exports listed for them. Never guess export names or deep file paths that are not listed.';
   await ctx.reply('Writing the /' + cmdName + ' command...');
   const bodyPrompt = 'Write ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function for a WhatsApp bot command named "/' + cmdName + '" using the npm package "' + pkg + '" (' + (desc || 'no description') + ').\n' + expLine + '\nOwner request: install ' + pkg + ' and provide /' + cmdName + '.\nRules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load the package inside the body with await import() using the REAL exports listed above.\n- ctx.args is the user\'s words as a string array (at least one is guaranteed); await ctx.reply(text) sends a plain reply; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, or files under auth/. No child_process, no shell, no writes outside /tmp.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and on failure reply with the actual error message (first 100 chars), never a generic "failed" message. Keep it under 30 lines.';
-  const bodyProblem = (b) => {
-    if (!b) return 'the AI returned nothing';
-    if (/export\s+default|module\.exports/.test(b)) return 'it included export statements (inner statements only, no exports)';
-    if (/^\s*import\s/m.test(b)) return 'it used import statements (load the package with await import() inside the body instead)';
-    if (/\brequire\s*\(/.test(b)) return 'it used require() (use await import() inside the body instead)';
-    if (/process\.env|auth\/|auth-backup|\.env\b|child_process|\bexecSync\b|\bspawn\b/.test(b)) return 'it touched env/secrets/shell (not allowed)';
-    return null;
-  };
   let code = null; let lastFail = '';
   for (let attempt = 1; attempt <= 3 && !code; attempt++) {
     let body = '';
     try {
-      const r = await askAi(bodyPrompt + (lastFail ? '\nYour previous attempt was rejected because ' + lastFail + '. Output corrected statements only.' : ''), { temperature: 0.3 });
+      const r = await ai(bodyPrompt + (lastFail ? '\nYour previous attempt was rejected because ' + lastFail + '. Output corrected statements only.' : ''), { temperature: 0.3 }, 'codegen');
       body = r && r.text ? r.text : '';
     } catch (e) { lastFail = 'the AI call failed (' + (e?.message || 'error') + ')'; continue; }
     body = String(body || '').trim().replace(/^```(?:js|javascript)?\s*/im, '').replace(/```\s*$/, '').trim();
     const prob = bodyProblem(body);
     if (prob) { lastFail = prob; shell.audit('CODEGEN attempt ' + attempt + ' rejected: ' + prob); continue; }
-    const candidate = 'export default {\n  name: \'' + cmdName + '\',\n  aliases: [],\n  category: \'Tools\',\n  description: ' + JSON.stringify((desc || pkg + ' helper').slice(0, 90)) + ',\n  usage: \'' + cmdName + ' <input>\',\n  minArgs: 1,\n  async run(ctx) {\n' + body + '\n  },\n};\n';
+    const candidate = buildCommandFile(cmdName, { desc: (desc || pkg + ' helper').slice(0, 90), usage: '<input>', minArgs: 1, body });
     const chkFile = path.join('src', 'commands', '_chk-' + cmdName + '.mjs');
     try { fs.writeFileSync(chkFile, candidate); } catch { lastFail = 'could not stage a temp file'; continue; }
     const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
@@ -427,6 +459,7 @@ async function runInstallConfirmed(ctx, p) {
     return ctx.reply('The new /' + cmdName + ' failed its self-test (' + String(e?.message || 'error').slice(0, 150) + '). Rolled back: package uninstalled, no command added. Jarvis keeps running as before.');
   }
   fs.renameSync(tmpFile, finalFile);
+  noteGenerated(cmdName, { pkg, version, file: finalFile, source: 'install', probeKeys: working.flatMap(([, v]) => v.keys || []).slice(0, 40) });
   shell.audit('COMMAND ADDED /' + cmdName + ' (package ' + pkg + ')');
   await ctx.reply('Installed ' + pkg + (version ? ' v' + version : '') + '. /' + cmdName + ' loads correctly (usage self-test passed). Restarting Jarvis now - back in about a minute. Honest note: real features are only proven when you run them; if /' + cmdName + ' errors, it will now show the real reason. (Rollback: "/agent remove the ' + cmdName + ' command".)');
   try { const { shutdown } = await import('../connection/whatsapp.js'); setTimeout(() => shutdown(0), 3000); } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
@@ -487,11 +520,24 @@ async function runUpdateConfirmed(ctx, p) {
     await shell.execShell('cp ' + JSON.stringify(backupDir) + '/package.json ' + JSON.stringify(backupDir) + '/package-lock.json . && npm ci --no-audit --no-fund', { timeoutMs: 300000 });
     return ctx.reply('The updated packages failed a consistency check; the backup was restored. Nothing changed.');
   }
+  const compatNotes = [];
+  for (const u of plan) {
+    const affected = loadGenerated().filter((g) => g.pkg === u.name);
+    if (!affected.length) continue;
+    const exp = await probeExports(u.name);
+    const nowKeys = Object.values(exp).filter((v) => v && !v.probeError).flatMap((v) => v.keys || []);
+    for (const g of affected) {
+      const missing = nowKeys.length ? (g.probeKeys || []).filter((k) => !nowKeys.includes(k)) : [];
+      if (missing.length) compatNotes.push('/' + g.name + ': export(s) gone after update: ' + missing.slice(0, 5).join(', '));
+      else noteGenerated(g.name, { probeKeys: nowKeys.slice(0, 40) });
+    }
+  }
   const desc = updateAll ? plan.length + ' packages updated' : plan.map((u) => u.name + ' ' + u.from + '->' + u.to).join(', ');
   const { markPending } = await import('../utilities/updateguard.js');
   markPending({ desc, backupDir });
   shell.audit('UPDATE done, restarting for self-test: ' + desc);
   await ctx.reply('Updated ' + desc + '. Restarting Jarvis for the post-update self-test - back in about a minute. If the self-test fails, the backup is restored automatically.');
+  if (compatNotes.length) await ctx.reply('⚠️ Compatibility warning:\n' + compatNotes.join('\n') + '\nIf the command starts failing, say "/agent repair <name>".');
   try { const { shutdown } = await import('../connection/whatsapp.js'); setTimeout(() => shutdown(0), 3000); } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
   return true;
 }
@@ -525,10 +571,11 @@ function ownerDM() {
   return String(config.ownerNumber).replace(/\D/g, '') + '@s.whatsapp.net';
 }
 function scheduleOne(entry) {
-  if (!cron.validate(entry.cron)) return false;
+  if (!cron.validate(entry.cron) || entry.active === false) return false;
   const task = cron.schedule(entry.cron, async () => {
     const s = getSock();
-    if (!s) { logger.warn('[agent] schedule "' + entry.goal.slice(0, 40) + '" skipped: no live connection'); return; }
+    if (!s) { logger.warn('[agent] schedule "' + (entry.goal || entry.topic || '').slice(0, 40) + '" skipped: no live connection'); return; }
+    if (entry.kind === 'message') { await runMessageJob(entry); return; }
     shell.audit('SCHEDULE FIRED id=' + entry.id + ' goal="' + entry.goal.slice(0, 120) + '"');
     const ctx = {
       sock: s, jid: ownerDM(), sender: String(config.ownerNumber).replace(/\D/g, ''),
@@ -569,6 +616,11 @@ function taskFinish(id, status, note) {
   const t = list.find((x) => x.id === id);
   if (t) { t.status = status; t.finishedAt = Date.now(); t.note = String(note || '').slice(0, 200); saveTasks(list); }
 }
+function taskCheckpoint(id, transcript) {
+  const list = loadTasks();
+  const t = list.find((x) => x.id === id);
+  if (t && t.status === 'running') { t.transcript = transcript.slice(-12); saveTasks(list); }
+}
 // On boot: any task left 'running' was interrupted. Resume it once; if it is
 // interrupted again, mark it abandoned and tell the owner what was left over.
 function initTaskResume() {
@@ -603,7 +655,7 @@ function initTaskResume() {
           args: task.goal.split(/\s+/),
           reply: (txt, o) => s.sendMessage(own, { text: txt, ...(o || {}) }),
         };
-        try { await runShellMode(ctx, task.goal, task.id); }
+        try { await runShellMode(ctx, task.goal, task.id, task.transcript); }
         catch (e) { logger.warn('[agent] task resume failed: ' + (e?.message || 'error')); }
       }
     }
@@ -664,7 +716,7 @@ async function planRound(goal, transcript, jarvisCmds) {
   try {
     const r = await askAi(
       'You are Jarvis, a WhatsApp bot operating your own Linux server (Node.js app; code in src/, data in data/, cwd is the app root).\n' +
-      'Owner instruction: ' + goal + '\n\n' +
+      'Owner instruction: ' + goal + '\n\n' + (replyStyle() ? 'Owner reply-style preference for summaries: ' + replyStyle() + '\n\n' : '') +
       'Carry it out step by step. Reply with ONLY a JSON array of at most ' + SH_STEPS + ' steps:\n' +
       '1. {"sh":"<one POSIX shell command run from the app root>"} - file work, code/config edits, disk/process checks, curl API lookups, npm, tar.\n' +
       '2. {"cmd":"<jarvis command name>","args":"<args>"} - run one of your own bot commands. Prefer this when a command fits. You may use ANY command, including owner and group-admin ones. Command index (Category(count): sample names; near-misses are auto-corrected): ' + jarvisCmds + '\n' +
@@ -697,7 +749,7 @@ async function planRound(goal, transcript, jarvisCmds) {
       '- "how much ram is free" -> [{"sh":"free -m"}]\n' +
       '- "every night 2am cleanup" -> [{"schedule":{"cron":"0 2 * * *","goal":"clean old logs and temp files"}}]\n' +
       'For a single "download/play a song" goal, use one play command step. No other text.' + history,
-      { allowKeyless: true, temperature: 0.1, prefer: 'groq' });
+      { allowKeyless: true, temperature: 0.1, prefer: 'groq' }, 'plan');
     const parsed = parseShellPlan(r?.text || r);
     if (!parsed) logger.warn('[agent] plan parse failed, raw: ' + String(r?.text || r || '').replace(/\s+/g, ' ').slice(0, 400));
     return parsed;
@@ -785,10 +837,10 @@ async function runUnschedule(ctx, id) {
 async function runListSchedules(ctx) {
   const list = loadSchedules();
   if (!list.length) return ctx.reply('No scheduled tasks set. Example: "/agent every night at 2am clean old logs".');
-  await ctx.reply('Scheduled tasks:\n' + list.map((e) => '- [' + e.id + '] "' + e.goal.slice(0, 60) + '" at ' + e.cron + ' (IST)').join('\n'));
+  await ctx.reply('Scheduled tasks:\n' + list.map((e) => '- [' + e.id + '] "' + (e.goal || e.topic || '').slice(0, 60) + '" at ' + e.cron + ' (IST)' + (e.active === false ? ' [PAUSED]' : '') + (e.kind === 'message' ? ' [news digest]' : '')).join('\n') + '\nManage: "/agent pause schedule <id>", "/agent resume schedule <id>", "/agent reschedule <id> to <new time>", "/agent unschedule <id>".');
 }
 
-async function runShellMode(ctx, goal, taskId) {
+async function runShellMode(ctx, goal, taskId, seedTranscript) {
   // Raw output on request
   if (/^(raw|raw output|exact output)$/i.test(goal)) {
     if (lastRaw && Date.now() - lastRaw.ts < 600e3) return ctx.reply('Exact output:\n' + lastRaw.text.slice(0, 3500));
@@ -796,7 +848,7 @@ async function runShellMode(ctx, goal, taskId) {
   }
   const tid = taskId || taskStart(goal);
   try {
-    return await runShellModeBody(ctx, goal, tid);
+    return await runShellModeBody(ctx, goal, tid, seedTranscript);
   } catch (e) {
     taskFinish(tid, 'failed', e?.message || 'error');
     logger.warn('[agent] task crashed: ' + (e?.stack || e?.message || 'error'));
@@ -804,7 +856,7 @@ async function runShellMode(ctx, goal, taskId) {
   }
 }
 
-async function runShellModeBody(ctx, goal, tid) {
+async function runShellModeBody(ctx, goal, tid, seedTranscript) {
   ctx.__goal = goal;
   const prog = createProgressMessage(ctx, 'task', 20000);
   await prog.begin();
@@ -818,7 +870,7 @@ async function runShellModeBody(ctx, goal, tid) {
     byCat.get(k).push(c.name);
   }
   const jarvisCmds = [...byCat.entries()].sort().map(([k, v]) => k + '(' + v.length + '): ' + v.slice(0, 10).join(' ')).join('; ');
-  const transcript = [], results = [];
+  const transcript = Array.isArray(seedTranscript) ? [...seedTranscript] : [], results = [];
   const stagedShells = [];
   let restartsPlanned = 0, finalNote = null, executed = 0;
 
@@ -907,6 +959,7 @@ async function runShellModeBody(ctx, goal, tid) {
       }
       executed++;
       transcript.push(results[results.length - 1].cmd + ' -> exit ' + results[results.length - 1].code + '\n' + results[results.length - 1].out);
+      taskCheckpoint(tid, transcript);
     }
     if (stagedShells.length || restartsPlanned) break; // confirm/restart before continuing
   }
@@ -983,6 +1036,583 @@ async function runSafeMode(ctx, goal) {
   await ctx.reply('🤖 Done - ' + plan.length + ' step(s) finished.');
 }
 
+
+// ---- Auto-repair (guarded) --------------------------------------------------
+const REPAIR_BUDGET_FILE = path.join('data', 'repair-budget.json');
+const REPAIR_CURSOR_FILE = path.join('data', 'repair-cursor.json');
+function loadJson(f, d) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } }
+function saveJson(f, v) { try { fs.mkdirSync('data', { recursive: true }); fs.writeFileSync(f, JSON.stringify(v)); } catch { /* best effort */ } }
+function repairBudgetOk(name) {
+  const b = loadJson(REPAIR_BUDGET_FILE, {});
+  return Date.now() - (b[name] || 0) > 24 * 3600e3;
+}
+function repairBudgetUse(name) {
+  const b = loadJson(REPAIR_BUDGET_FILE, {});
+  b[name] = Date.now();
+  saveJson(REPAIR_BUDGET_FILE, b);
+}
+
+/** Rewrite a generated command to fix a runtime error. Same gates as install:
+ *  safety scan, node --check, usage-only self-test (no side effects). */
+async function repairCommand(name, errMsg) {
+  const entry = getGenerated(name);
+  if (!entry) return { ok: false, why: '/' + name + ' was not generated by me, so I will not rewrite it automatically.' };
+  const file = path.join('src', 'commands', name + '.js');
+  let code;
+  try { code = fs.readFileSync(file, 'utf8'); } catch { return { ok: false, why: 'the command file is missing' }; }
+  if (/rm\s+-rf|kill\s+-9|\bkillall\b|unlinkSync|rmSync|execSync|child_process/.test(code)) {
+    return { ok: false, why: '/' + name + ' can delete or change things, so I will not rewrite it automatically.' };
+  }
+  const prompt = 'A WhatsApp bot command named "/' + name + '" fails at runtime with this error: ' + String(errMsg).slice(0, 200) +
+    '\nHere is its full current code:\n' + code.slice(0, 6000) +
+    '\nRewrite ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function, fixing the error while keeping the same purpose. ' + CODEGEN_RULES;
+  let body = null; let lastFail = '';
+  for (let attempt = 1; attempt <= 3 && !body; attempt++) {
+    let b = '';
+    try {
+      const r = await ai(prompt + (lastFail ? '\nYour previous attempt was rejected because ' + lastFail + '. Output corrected statements only.' : ''), { temperature: 0.3 }, 'repair');
+      b = r && r.text ? r.text : '';
+    } catch (e) { lastFail = 'the AI call failed (' + (e?.message || 'error') + ')'; continue; }
+    b = String(b || '').trim().replace(/^```(?:js|javascript)?\s*/im, '').replace(/```\s*$/, '').trim();
+    const prob = bodyProblem(b);
+    if (prob) { lastFail = prob; continue; }
+    body = b;
+  }
+  if (!body) return { ok: false, why: 'could not generate a fix (' + lastFail.slice(0, 100) + ')' };
+  const candidate = buildCommandFile(name, { desc: (entry.pkg || name) + ' helper', usage: entry.usage || '<input>', minArgs: entry.minArgs ?? 1, body });
+  const chkFile = path.join('src', 'commands', '_chk-repair-' + name + '.mjs');
+  try {
+    fs.writeFileSync(chkFile, candidate);
+    const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
+    if (chk.code !== 0) return { ok: false, why: 'the fix had a syntax error' };
+  } finally { try { fs.unlinkSync(chkFile); } catch {} }
+  // usage-only self-test against the candidate (mock ctx, empty args - no side effects)
+  const stFile = path.join('src', 'commands', '_st-' + name + '.js');
+  try {
+    fs.writeFileSync(stFile, candidate);
+    const mod = await import('./_st-' + name + '.js?t=' + Date.now());
+    const cmd = mod.default;
+    if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
+    const replies = [];
+    const mockCtx = { args: [], sender: 'selftest', senderJid: 'selftest', jid: 'selftest', isOwner: true, isGroup: false, msg: {}, text: '', commands: registry, sock: null, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
+    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
+  } catch (e) {
+    return { ok: false, why: 'the fix failed its load test (' + String(e?.message || e).slice(0, 80) + ')' };
+  } finally { try { fs.unlinkSync(stFile); } catch {} }
+  archiveVersion(name);
+  fs.writeFileSync(file, candidate);
+  noteGenerated(name, { repairs: (entry.repairs || 0) + 1, lastError: String(errMsg).slice(0, 200) });
+  // hot-swap the live registration so no restart is needed
+  try {
+    const mod = await import('./' + name + '.js?t=' + Date.now());
+    registry.register(mod.default);
+  } catch (e) {
+    return { ok: false, why: 'fix written but reload failed (' + String(e?.message || e).slice(0, 80) + ') - a restart will load it' };
+  }
+  shell.audit('REPAIR /' + name + ' fixed err="' + String(errMsg).slice(0, 80) + '" (repair #' + ((entry.repairs || 0) + 1) + ')');
+  return { ok: true };
+}
+
+async function runRepairRoute(ctx, name) {
+  name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+  if (!name) return ctx.reply('Say e.g. "/agent repair zenbotscraper".');
+  if (!getGenerated(name)) return ctx.reply('/' + name + ' is not a command I generated, so I will not rewrite it.');
+  await ctx.reply('Diagnosing /' + name + ' and attempting a repair (safety scan + load test before anything goes live)...');
+  const fails = readFailures(Date.now() - 7 * 24 * 3600e3).filter((f) => f.cmd === name);
+  const lastErr = fails.length ? fails[fails.length - 1].err : 'owner-requested repair (no recent logged error)';
+  const r = await repairCommand(name, lastErr);
+  if (r.ok) return ctx.reply('🔧 Repaired /' + name + ' (last error: ' + lastErr.slice(0, 100) + '). It passes the load test now - try it. Rollback: "/agent restore cmd ' + name + ' 1".');
+  return ctx.reply('I could not repair /' + name + ': ' + r.why + ' Nothing was changed. (Rollback options: "/agent history ' + name + '".)');
+}
+
+function initRepairWatch() {
+  const tick = async () => {
+    const cursor = loadJson(REPAIR_CURSOR_FILE, { ts: Date.now() });
+    const fails = readFailures(cursor.ts);
+    saveJson(REPAIR_CURSOR_FILE, { ts: Date.now() });
+    if (!fails.length) return;
+    const s = getSock();
+    if (!s) return;
+    const seen = new Set();
+    for (const f of fails) {
+      if (seen.has(f.cmd)) continue;
+      seen.add(f.cmd);
+      if (!getGenerated(f.cmd) || !repairBudgetOk(f.cmd)) continue;
+      repairBudgetUse(f.cmd);
+      shell.audit('REPAIR auto attempt /' + f.cmd + ' err="' + f.err.slice(0, 80) + '"');
+      const r = await repairCommand(f.cmd, f.err);
+      if (r.ok) {
+        await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair: /' + f.cmd + ' was failing ("' + f.err.slice(0, 100) + '"). I rewrote it and it passes the load test now - try it again. If it still fails, I will not auto-retry it today.' }).catch(() => {});
+      } else {
+        await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair: /' + f.cmd + ' failed but I could not fix it automatically (' + r.why.slice(0, 150) + '). Original error: ' + f.err.slice(0, 100) }).catch(() => {});
+      }
+    }
+  };
+  const t = setInterval(() => { tick().catch((e) => logger.warn('[agent] repair watch: ' + (e?.message || 'error'))); }, 90e3);
+  t.unref?.();
+}
+try { initRepairWatch(); } catch (e) { logger.warn('[agent] repair-watch init: ' + (e?.message || 'error')); }
+
+
+// ---- Status routes: health, quota, permissions, history -------------------
+function riskLabel(code) {
+  if (/rm\s+-rf|unlinkSync|rmSync|execSync|child_process|\bkill\b/.test(code)) return 'destructive-ish';
+  if (/writeFileSync|fs\.write|appendFileSync/.test(code)) return 'filesystem';
+  if (/fetch\(|https?\.get|axios|await import\(/.test(code)) return 'network';
+  return 'local';
+}
+
+async function runHealth(ctx) {
+  const fails = readFailures(Date.now() - 7 * 24 * 3600e3);
+  const byCmd = {};
+  for (const f of fails) byCmd[f.cmd] = (byCmd[f.cmd] || 0) + 1;
+  const top = Object.entries(byCmd).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const gen = loadGenerated();
+  const rss = Math.round(process.memoryUsage().rss / 1048576);
+  let boot = 'unknown';
+  try { boot = new Date(Number(fs.readFileSync(path.join('data', 'agent-boot'), 'utf8'))).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }); } catch { /* unknown */ }
+  const lines = [
+    '🩺 Health (last 7 days)',
+    '- Generated commands: ' + gen.length + ' (' + gen.filter((g) => (g.repairs || 0) > 0).length + ' repaired at least once)',
+    '- Commands failing: ' + Object.keys(byCmd).length + ' (' + fails.length + ' failures total)',
+    '- RAM now: ' + rss + ' MB | last bot start: ' + boot + ' (IST)',
+  ];
+  if (top.length) {
+    lines.push('Top failing:');
+    for (const [name, n] of top) {
+      const isGen = !!getGenerated(name);
+      lines.push('- /' + name + ': ' + n + 'x' + (isGen ? ' - fix: "/agent repair ' + name + '"' : ' (not generated by me - no auto-fix)'));
+    }
+  } else {
+    lines.push('No failures logged in the last 7 days.');
+  }
+  await ctx.reply(lines.join('\n'));
+}
+
+async function runQuota(ctx) {
+  const q = loadJson(QUOTA_FILE, null);
+  if (!q || !q.day) return ctx.reply('No /agent AI calls recorded today yet.');
+  const feats = Object.entries(q.byFeature || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + ': ' + v).join(', ');
+  await ctx.reply('Today\'s /agent AI usage (my own counters, estimates only - the providers\' real quotas live on their side):\n- Calls: ' + q.calls + '\n- Failed calls: ' + (q.failures || 0) + '\n- By feature: ' + (feats || 'none') + '\nFree-tier providers (Gemini/Cohere) apply their own daily limits; when one runs out, calls start failing and you will see it here.');
+}
+
+async function runPermissions(ctx) {
+  const gen = loadGenerated();
+  if (!gen.length) return ctx.reply('No generated commands yet.');
+  const flags = loadJson(path.join('data', 'command-flags.json'), { disabled: [] });
+  const lines = ['Generated command permissions (risk labels are a static guess, approximate):'];
+  for (const g of gen) {
+    let code = '';
+    try { code = fs.readFileSync(path.join('src', 'commands', g.name + '.js'), 'utf8'); } catch { /* missing */ }
+    const state = (flags.disabled || []).includes(g.name) ? 'DISABLED' : 'enabled';
+    lines.push('- /' + g.name + ': ' + riskLabel(code) + ', ' + state + (g.pkg ? ' (pkg ' + g.pkg + ')' : g.apiUrl ? ' (API)' : ''));
+  }
+  lines.push('Toggle with "/agent disable cmd <name>" or "/agent enable cmd <name>".');
+  await ctx.reply(lines.join('\n'));
+}
+
+async function runCmdToggle(ctx, action, name) {
+  name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+  if (!registry.get(name)) return ctx.reply('No command called /' + name + '.');
+  const f = path.join('data', 'command-flags.json');
+  const flags = loadJson(f, { disabled: [] });
+  flags.disabled = flags.disabled || [];
+  if (action.toLowerCase() === 'disable') {
+    if (!flags.disabled.includes(name)) flags.disabled.push(name);
+  } else {
+    flags.disabled = flags.disabled.filter((x) => x !== name);
+  }
+  saveJson(f, flags);
+  shell.audit('CMD ' + action.toUpperCase() + ' /' + name);
+  await ctx.reply('/' + name + ' is now ' + (action.toLowerCase() === 'disable' ? 'DISABLED (everyone, until you enable it)' : 'enabled again') + '.');
+}
+
+async function runHistory(ctx, name) {
+  name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+  const versions = listVersions(name);
+  if (!versions.length) return ctx.reply('No saved versions for /' + name + '.');
+  const lines = ['Saved versions of /' + name + ' (newest first):'];
+  const recent = versions.slice(-5).reverse();
+  recent.forEach((v, i) => {
+    let size = 0;
+    try { size = fs.statSync(versionPath(name, v)).size; } catch { /* unknown */ }
+    lines.push((i + 1) + '. ' + v.replace('.js', '').replace('T', ' ').slice(0, 19) + ' UTC (' + size + ' bytes)');
+  });
+  lines.push('See changes: "/agent diff ' + name + ' <n>". Restore: "/agent restore cmd ' + name + ' <n>".');
+  await ctx.reply(lines.join('\n'));
+}
+
+async function runDiff(ctx, name, n) {
+  name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+  const versions = listVersions(name);
+  const recent = versions.slice(-5).reverse();
+  const pick = recent[n - 1];
+  if (!pick) return ctx.reply('No version ' + n + ' for /' + name + '. Say "/agent history ' + name + '".');
+  const vp = versionPath(name, pick);
+  const cur = path.join('src', 'commands', name + '.js');
+  if (!fs.existsSync(cur)) return ctx.reply('/' + name + ' is not currently installed.');
+  const r = await shell.execShell('diff -u ' + JSON.stringify(vp) + ' ' + JSON.stringify(cur) + ' | head -80', { timeoutMs: 15000 });
+  await ctx.reply('Diff of /' + name + ': version ' + n + ' vs current (--- old, +++ current):\n' + (r.out || '(identical)' || '').slice(0, 3000));
+}
+
+async function runRestoreCmd(ctx, name, n) {
+  name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+  const versions = listVersions(name);
+  const pick = versions.slice(-5).reverse()[n - 1];
+  if (!pick) return ctx.reply('No version ' + n + ' for /' + name + '. Say "/agent history ' + name + '".');
+  shell.stage([], { kind: 'restorecmd', restorecmd: { name, file: versionPath(name, pick) } });
+  shell.audit('RESTORE CMD STAGED /' + name + ' version ' + n);
+  await ctx.reply('Restore /' + name + ' to version ' + n + ' (' + pick.replace('.js', '') + ')? The current version is archived first. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+}
+
+async function runRestoreCmdConfirmed(ctx, p) {
+  const { name, file } = p.restorecmd;
+  try {
+    archiveVersion(name);
+    fs.copyFileSync(file, path.join('src', 'commands', name + '.js'));
+    const mod = await import('./' + name + '.js?t=' + Date.now());
+    registry.register(mod.default);
+    shell.audit('RESTORE CMD /' + name + ' <- ' + path.basename(file));
+    return ctx.reply('/' + name + ' restored to the archived version and is live now.');
+  } catch (e) {
+    return ctx.reply('Restore failed: ' + String(e?.message || e).slice(0, 150) + '. Nothing else changed.');
+  }
+}
+
+// ---- Reply style (applies to /agent conversational replies only) ----------
+const STYLE_FILE = path.join('data', 'reply-style.json');
+function replyStyle() {
+  const s = loadJson(STYLE_FILE, null);
+  return s && s.style ? s.style : '';
+}
+async function runReplyStyle(ctx, text) {
+  const style = String(text || '').slice(0, 150).trim();
+  if (/^(default|reset)$/i.test(style)) {
+    saveJson(STYLE_FILE, {});
+    return ctx.reply('Reply style reset to default.');
+  }
+  saveJson(STYLE_FILE, { style, setAt: Date.now() });
+  shell.audit('REPLY STYLE set: ' + style.slice(0, 80));
+  await ctx.reply('Got it - my /agent replies will follow: "' + style + '". (Bot command replies stay in English as before.)');
+}
+
+// ---- Automations: pause/resume/reschedule + live-source message jobs ------
+async function runPauseSchedule(ctx, action, id) {
+  const list = loadSchedules();
+  const e = list.find((x) => x.id === id);
+  if (!e) return ctx.reply('No scheduled task with id "' + id + '". Say "/agent schedules" to see them.');
+  if (action.toLowerCase() === 'pause') {
+    e.active = false;
+    const t = schedJobs.get(id); if (t) { try { t.stop(); } catch {} schedJobs.delete(id); }
+  } else {
+    e.active = true;
+    if (!schedJobs.has(id)) scheduleOne(e);
+  }
+  saveSchedules(list);
+  shell.audit('SCHEDULE ' + action.toUpperCase() + ' id=' + id);
+  await ctx.reply('Scheduled task [' + id + '] "' + (e.goal || e.topic || '').slice(0, 60) + '" is now ' + (e.active ? 'RUNNING again' : 'PAUSED (kept, will not fire)') + '.');
+}
+
+async function runReschedule(ctx, id, whenText) {
+  const list = loadSchedules();
+  const e = list.find((x) => x.id === id);
+  if (!e) return ctx.reply('No scheduled task with id "' + id + '". Say "/agent schedules" to see them.');
+  const r = await ai('Convert this time description to a 5-field cron expression (Asia/Kolkata). Reply with ONLY the cron fields, nothing else. Time: ' + String(whenText).slice(0, 100), { temperature: 0 }, 'schedule');
+  const c = String(r && r.text || '').trim().split('\n')[0].trim();
+  if (!cron.validate(c)) return ctx.reply('I could not turn "' + whenText + '" into a schedule. Try e.g. "/agent reschedule ' + id + ' to every day 8am".');
+  e.cron = c;
+  const t = schedJobs.get(id); if (t) { try { t.stop(); } catch {} schedJobs.delete(id); }
+  if (e.active !== false) scheduleOne(e);
+  saveSchedules(list);
+  shell.audit('SCHEDULE RESCHEDULED id=' + id + ' cron="' + c + '"');
+  await ctx.reply('Scheduled task [' + id + '] now runs at "' + c + '" (IST)' + (e.active === false ? ' once you resume it' : '') + '.');
+}
+
+async function fetchNewsItems(topic) {
+  const url = 'https://news.google.com/rss/search?q=' + encodeURIComponent(topic) + '&hl=en-IN&gl=IN&ceid=IN:en';
+  const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error('news feed returned HTTP ' + r.status);
+  const xml = await r.text();
+  const clean = (x) => String(x || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 5).map((m) => ({
+    title: clean((m[1].match(/<title>([\s\S]*?)<\/title>/) || [])[1]),
+    link: clean((m[1].match(/<link>([\s\S]*?)<\/link>/) || [])[1]),
+  })).filter((x) => x.title);
+  if (!items.length) throw new Error('no live news items found for "' + topic + '"');
+  return items;
+}
+
+async function runMessageJob(entry) {
+  const s = getSock();
+  if (!s) return;
+  shell.audit('MSGJOB fired id=' + entry.id + ' topic="' + entry.topic + '"');
+  try {
+    const items = await fetchNewsItems(entry.topic);
+    const r = await ai('Summarize these LIVE news headlines about "' + entry.topic + '" into a short WhatsApp digest (max 6 lines, plain English, keep each link with its headline):\n' + items.map((x, i) => (i + 1) + '. ' + x.title + ' ' + x.link).join('\n'), { temperature: 0.3 }, 'msgjob');
+    const text = String(r && r.text || '').trim() || items.map((x) => '- ' + x.title + '\n' + x.link).join('\n');
+    await s.sendMessage(ownerDM(), { text: '📰 ' + entry.topic + ' update (live sources):\n' + text.slice(0, 2000) });
+  } catch (e) {
+    await s.sendMessage(ownerDM(), { text: '📰 Your scheduled "' + entry.topic + '" update could not run: ' + String(e?.message || e).slice(0, 150) + '. I will try again at the next scheduled time.' }).catch(() => {});
+  }
+}
+
+function isMessageJobGoal(goal) {
+  return /(every|har\s|roz)\b[\s\S]*(send me|bhejo|news|updates?)/i.test(goal) && !/clean|delete|restart|update all/i.test(goal);
+}
+
+async function runMessageJobFlow(ctx, goal) {
+  const r = await ai('Extract a recurring WhatsApp news-update job from this request. Reply with ONLY JSON: {"cron":"<5-field cron, Asia/Kolkata>","topic":"<news topic in English, 1-4 words>"}. Request: ' + goal.slice(0, 200), { temperature: 0 }, 'schedule');
+  let spec = null;
+  try { spec = JSON.parse(String(r && r.text || '').replace(/```json|```/g, '').trim()); } catch { /* parse fail */ }
+  if (!spec || !spec.cron || !spec.topic || !cron.validate(String(spec.cron).trim())) {
+    return ctx.reply('I could not turn that into a scheduled update. Example: "/agent every day 8am send me tech news".');
+  }
+  spec.cron = String(spec.cron).trim();
+  spec.topic = String(spec.topic).slice(0, 60);
+  shell.stage([], { kind: 'msgjob', msgjob: spec });
+  shell.audit('MSGJOB STAGED cron="' + spec.cron + '" topic="' + spec.topic + '"');
+  await ctx.reply('Plan: every "' + spec.cron + '" (IST) I will fetch LIVE news about "' + spec.topic + '" and send you a short digest. Note: it uses a live news feed - if the feed is unreachable I will say so instead of inventing news. Reply YES within 5 minutes to set it, or NO to cancel.');
+}
+
+async function runMessageJobConfirmed(ctx, p) {
+  const spec = p.msgjob;
+  const list = loadSchedules();
+  const entry = { id: Math.random().toString(36).slice(2, 8), kind: 'message', cron: spec.cron, topic: spec.topic, goal: 'news update: ' + spec.topic, active: true, createdAt: Date.now() };
+  if (!scheduleOne(entry)) return ctx.reply('That schedule was invalid - nothing was set.');
+  list.push(entry); saveSchedules(list);
+  shell.audit('MSGJOB SET id=' + entry.id + ' cron="' + entry.cron + '" topic="' + entry.topic + '"');
+  await ctx.reply('Set [' + entry.id + ']: live "' + entry.topic + '" digest at ' + entry.cron + ' (IST). Manage: "/agent schedules", "/agent pause schedule ' + entry.id + '", "/agent reschedule ' + entry.id + ' to <new time>", "/agent unschedule ' + entry.id + '".');
+  return true;
+}
+
+// ---- Feature-builder: requirement-first command creation ------------------
+function isBuilderGoal(goal) {
+  return /(command|cmd|tool)s?\s*(banao|bana\s*do|banado|bna\s*do)/i.test(goal)
+    || /^(make|build|create)\s+(a\s+|an\s+|me\s+a\s+)?[\w\s-]{2,60}(command|tool)$/i.test(goal);
+}
+function builderCmdName(goal, fallback) {
+  const m = goal.match(/\b(?:called|named|naam)\s+\/?([a-z0-9]{3,15})\b/i);
+  let name = (m ? m[1] : fallback || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
+  if (name.length < 3) name = '';
+  return name;
+}
+
+async function runBuilderFlow(ctx, goal) {
+  // 1) pre-tested template first - no LLM, no quota
+  const tpl = pickTemplate(goal);
+  if (tpl) {
+    let name = builderCmdName(goal, tpl.key);
+    if (!name) name = tpl.key;
+    if (registry.get(name)) {
+      const alt = (name + '2').slice(0, 15);
+      if (registry.get(alt)) return ctx.reply('/' + name + ' and /' + alt + ' already exist - say e.g. "make a ' + tpl.key + ' command called ' + tpl.key + 'x".');
+      name = alt;
+    }
+    shell.stage([], { kind: 'template', template: { key: tpl.key, cmdName: name, desc: tpl.desc, usage: tpl.usage || '<input>', minArgs: tpl.minArgs ?? 1 } });
+    shell.audit('TEMPLATE STAGED ' + tpl.key + ' as /' + name);
+    return ctx.reply('Plan: add /' + name + ' from a pre-tested template (' + tpl.desc + '). No AI code writing needed for this one. Reply YES within 5 minutes to add it, or NO to cancel.');
+  }
+  // 2) LLM maps the requirement to a real package or a keyless free API
+  const r = await ai('A WhatsApp bot owner wants a new command: "' + goal.slice(0, 200) + '".\nDecide the implementation. Reply with ONLY JSON:\n{"package":"<one real npm package name>","cmdName":"<3-15 lowercase letters>"} if an npm package fits best,\n{"api":"<one keyless free https GET endpoint>","cmdName":"<3-15 lowercase letters>","how":"<one line>"} if a keyless free public API fits best,\n{"unknown":"<one line why>"} if it needs a paid/keyed service or you are not sure. Never invent package names or URLs.', { temperature: 0.2 }, 'builder');
+  let spec = null;
+  try { spec = JSON.parse(String(r && r.text || '').replace(/```json|```/g, '').trim()); } catch { /* parse fail */ }
+  if (!spec) return ctx.reply('I could not plan that command. Try naming the npm package directly, e.g. "/agent install <package>".');
+  if (spec.unknown) return ctx.reply('I cannot build that reliably: ' + String(spec.unknown).slice(0, 200) + ' If you know a specific free npm package or keyless API for it, name it and I will use that.');
+  const name = builderCmdName(goal, spec.cmdName) || String(spec.cmdName || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
+  if (!name || name.length < 3) return ctx.reply('I need a short command name. Say e.g. "... called mytool".');
+  if (registry.get(name)) return ctx.reply('/' + name + ' already exists - pick another name ("... called ' + name + 'x").');
+  if (spec.package) {
+    const pkg = String(spec.package).trim();
+    const meta = await npmMeta(pkg);
+    if (meta.exists === null) return ctx.reply('The npm registry could not be reached just now - try again in a moment.');
+    if (!meta.exists) return ctx.reply('The AI suggested npm package "' + pkg + '" but it does not exist on the registry. Rephrase or name a real package.');
+    shell.stage([], { kind: 'install', install: { pkg, version: meta.version, cmdName: name, desc: String(meta.description || '').slice(0, 150), finalFile: path.join('src', 'commands', name + '.js') } });
+    shell.audit('BUILDER->INSTALL STAGED ' + pkg + ' as /' + name);
+    return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and build /' + name + ' on it (' + String(meta.description || 'no description').slice(0, 120) + '). Self-test, then live. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+  }
+  if (spec.api) {
+    const url = String(spec.api).trim();
+    if (!/^https:\/\//i.test(url)) return ctx.reply('The suggested API is not a plain https GET endpoint - I will not use it.');
+    let probe = null;
+    try {
+      const pr = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      probe = { ok: pr.ok, status: pr.status };
+    } catch (e) { probe = { ok: false, status: String(e?.message || e).slice(0, 80) }; }
+    if (!probe.ok) return ctx.reply('The free API I found for that (' + url.slice(0, 80) + ') is not responding (' + probe.status + '). Not building on a dead source - try again later or name another API.');
+    shell.stage([], { kind: 'apicmd', apicmd: { url, cmdName: name, how: String(spec.how || goal).slice(0, 150), goal: goal.slice(0, 200) } });
+    shell.audit('APICMD STAGED ' + url.slice(0, 80) + ' as /' + name);
+    return ctx.reply('Plan: build /' + name + ' on the free keyless API ' + url.slice(0, 100) + ' (reachable right now). Code is AI-written, then safety-scanned and load-tested before going live. Reply YES within 5 minutes, or NO to cancel.');
+  }
+  return ctx.reply('I could not plan that command. Try naming the npm package directly, e.g. "/agent install <package>".');
+}
+
+async function runTemplateConfirmed(ctx, p) {
+  const t = p.template;
+  const tpl = pickTemplate(t.key) || Object.values((await import('../utils/templates.js')).TEMPLATES).find((x) => x.desc === t.desc);
+  const body = (pickTemplate(t.key) || {}).body;
+  if (!body) return ctx.reply('Template "' + t.key + '" not found - nothing was added.');
+  const code = buildCommandFile(t.cmdName, { desc: t.desc, usage: t.usage, minArgs: t.minArgs, body: body.replaceAll('CMDNAME', t.cmdName) });
+  const chkFile = path.join('src', 'commands', '_chk-' + t.cmdName + '.mjs');
+  try {
+    fs.writeFileSync(chkFile, code);
+    const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
+    if (chk.code !== 0) return ctx.reply('The template file failed its syntax check - nothing was added. (My bug, not yours.)');
+  } finally { try { fs.unlinkSync(chkFile); } catch {} }
+  try {
+    const stFile = path.join('src', 'commands', '_st-' + t.cmdName + '.js');
+    fs.writeFileSync(stFile, code);
+    const mod = await import('./_st-' + t.cmdName + '.js?t=' + Date.now());
+    const cmd = mod.default;
+    if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
+    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: registry, sock: ctx.sock, reply: async () => ({ key: {} }) };
+    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
+    try { fs.unlinkSync(stFile); } catch {}
+  } catch (e) {
+    try { fs.unlinkSync(path.join('src', 'commands', '_st-' + t.cmdName + '.js')); } catch {}
+    return ctx.reply('The template command failed its load test (' + String(e?.message || e).slice(0, 100) + ') - nothing was added.');
+  }
+  const finalFile = path.join('src', 'commands', t.cmdName + '.js');
+  fs.writeFileSync(finalFile, code);
+  const mod = await import('./' + t.cmdName + '.js?t=' + Date.now());
+  registry.register(mod.default);
+  noteGenerated(t.cmdName, { file: finalFile, source: 'template', template: t.key });
+  shell.audit('COMMAND ADDED /' + t.cmdName + ' (template ' + t.key + ')');
+  await ctx.reply('/' + t.cmdName + ' is live now (no restart needed). It is from a pre-tested template and loads correctly; if the external service it uses is down, it will say the real reason.');
+  return true;
+}
+
+async function runApiCmdConfirmed(ctx, p) {
+  const { url, cmdName, how, goal } = p.apicmd;
+  await ctx.reply('Writing /' + cmdName + ' against ' + url.slice(0, 80) + '...');
+  const prompt = 'Write ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function for a WhatsApp bot command named "/' + cmdName + '". It must use the keyless free API endpoint ' + url + ' via global fetch (no keys exist). Purpose: ' + how + '. Owner request: ' + goal + '. ' + CODEGEN_RULES;
+  let code = null; let lastFail = '';
+  for (let attempt = 1; attempt <= 3 && !code; attempt++) {
+    let body = '';
+    try {
+      const r = await ai(prompt + (lastFail ? '\nYour previous attempt was rejected because ' + lastFail + '. Output corrected statements only.' : ''), { temperature: 0.3 }, 'codegen');
+      body = r && r.text ? r.text : '';
+    } catch (e) { lastFail = 'the AI call failed (' + (e?.message || 'error') + ')'; continue; }
+    body = String(body || '').trim().replace(/^```(?:js|javascript)?\s*/im, '').replace(/```\s*$/, '').trim();
+    const prob = bodyProblem(body);
+    if (prob) { lastFail = prob; continue; }
+    const candidate = buildCommandFile(cmdName, { desc: how || cmdName + ' helper', usage: '<input>', minArgs: 1, body });
+    const chkFile = path.join('src', 'commands', '_chk-' + cmdName + '.mjs');
+    try {
+      fs.writeFileSync(chkFile, candidate);
+      const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
+      if (chk.code === 0) code = candidate; else lastFail = 'syntax error: ' + String(chk.out || '').trim().split('\n').slice(-2).join(' ').slice(0, 150);
+    } finally { try { fs.unlinkSync(chkFile); } catch {} }
+  }
+  if (!code) return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Nothing was added.');
+  try {
+    const stFile = path.join('src', 'commands', '_st-' + cmdName + '.js');
+    fs.writeFileSync(stFile, code);
+    const mod = await import('./_st-' + cmdName + '.js?t=' + Date.now());
+    const cmd = mod.default;
+    if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
+    const replies = [];
+    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: registry, sock: ctx.sock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
+    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
+    try { fs.unlinkSync(stFile); } catch {}
+  } catch (e) {
+    try { fs.unlinkSync(path.join('src', 'commands', '_st-' + cmdName + '.js')); } catch {}
+    return ctx.reply('/' + cmdName + ' failed its load test (' + String(e?.message || e).slice(0, 120) + ') - nothing was added.');
+  }
+  const finalFile = path.join('src', 'commands', cmdName + '.js');
+  fs.writeFileSync(finalFile, code);
+  const mod = await import('./' + cmdName + '.js?t=' + Date.now());
+  registry.register(mod.default);
+  noteGenerated(cmdName, { file: finalFile, source: 'builder', apiUrl: url });
+  shell.audit('COMMAND ADDED /' + cmdName + ' (API ' + url.slice(0, 60) + ')');
+  await ctx.reply('/' + cmdName + ' is live now (no restart needed). It loads correctly (usage self-test passed); real features are only proven when you run it - if it errors, it will show the real reason.');
+  return true;
+}
+
+// ---- Recovery kit (private, owner DM only) --------------------------------
+async function runRecoveryKit(ctx) {
+  if (ctx.isGroup) return ctx.reply('Recovery kits are private - ask me in our private chat.');
+  const { buffer, count } = buildKit();
+  const day = new Date().toISOString().slice(0, 10);
+  await ctx.sock.sendMessage(ctx.jid, { document: buffer, mimetype: 'application/zip', fileName: 'jarvis-recovery-' + day + '.zip', caption: '🔐 Private recovery kit: ' + count + ' generated command(s), package manifest, data backup. Keep it private. Restore: quote this file with "/agent restore". After a FULL server wipe the base bot must be redeployed first.' }, { quoted: ctx.msg });
+}
+
+async function runRestore(ctx) {
+  if (ctx.isGroup) return ctx.reply('Restore is private - use our private chat.');
+  const quoted = ctx.msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+  const doc = quoted?.documentMessage;
+  if (!doc) return ctx.reply('Quote a recovery kit zip file with "/agent restore". Get one anytime with "/agent recovery kit".');
+  let buffer;
+  try {
+    const { downloadMediaMessage } = await import('@whiskeysockets/baileys');
+    const fakeMsg = { key: ctx.msg.key, message: quoted };
+    buffer = await downloadMediaMessage(fakeMsg, 'buffer', {}, { logger, reuploadRequest: ctx.sock.updateMediaMessage });
+  } catch (e) {
+    return ctx.reply('Could not download the quoted file: ' + String(e?.message || e).slice(0, 120) + '. Re-send the kit zip and quote it again.');
+  }
+  let staged;
+  try { staged = unpackKit(buffer); } catch (e) { return ctx.reply('That file is not a valid recovery kit: ' + String(e?.message || e).slice(0, 120)); }
+  const n = staged.manifest?.generated?.length || 0;
+  shell.stage([], { kind: 'restore', restore: { dir: staged.dir } });
+  shell.audit('RESTORE STAGED kit from ' + (staged.manifest?.createdAt || '?') + ' (' + n + ' commands)');
+  await ctx.reply('Recovery kit from ' + (staged.manifest?.createdAt || 'unknown date') + ' with ' + n + ' generated command(s). Restore will: rewrite those command files (current versions archived), restore the data backup, install any missing packages, then restart. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+}
+
+async function runRestoreConfirmed(ctx, p) {
+  const dir = p.restore.dir;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'recovery-manifest.json'), 'utf8'));
+    // 1) command files
+    let restored = 0;
+    for (const e of manifest.generated || []) {
+      const staged = path.join(dir, 'cmd_' + e.name + '.js');
+      if (!fs.existsSync(staged)) continue;
+      archiveVersion(e.name);
+      fs.copyFileSync(staged, path.join('src', 'commands', e.name + '.js'));
+      noteGenerated(e.name, { ...e, updatedAt: Date.now() });
+      restored++;
+    }
+    // 2) data backup
+    const dbz = path.join(dir, 'data-backup.zip');
+    if (fs.existsSync(dbz)) {
+      const { default: AdmZip } = await import('adm-zip');
+      const zip = new AdmZip(dbz);
+      for (const entry of zip.getEntries()) {
+        if (!/^[\w.-]+\.json$/.test(entry.entryName)) continue;
+        fs.writeFileSync(path.join('data', entry.entryName), entry.getData());
+      }
+    }
+    // 3) missing packages
+    let current = {};
+    try { current = JSON.parse(fs.readFileSync('package.json', 'utf8')).dependencies || {}; } catch { /* none */ }
+    const missing = Object.entries(manifest.dependencies || {}).filter(([k]) => !current[k]);
+    if (missing.length) {
+      const args = missing.map(([k, v]) => JSON.stringify(k + '@' + v)).join(' ');
+      await ctx.reply('Installing ' + missing.length + ' missing package(s) from the kit manifest...');
+      const r = await shell.execShell('npm install ' + args + ' --no-audit --no-fund', { timeoutMs: 300000 });
+      if (r.code !== 0) {
+        shell.audit('RESTORE partial: package install failed');
+        return ctx.reply('Commands and data restored, but package installation failed:\n' + String(r.out || '').slice(-300) + '\nGenerated commands needing those packages will fail until fixed. Not restarting.');
+      }
+    }
+    shell.audit('RESTORE done: ' + restored + ' commands, ' + missing.length + ' packages');
+    await ctx.reply('Restore complete: ' + restored + ' command(s), data backup applied' + (missing.length ? ', ' + missing.length + ' package(s) installed' : '') + '. Restarting now - back in about a minute.');
+    try { const { shutdown } = await import('../connection/whatsapp.js'); setTimeout(() => shutdown(0), 3000); } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
+    return true;
+  } catch (e) {
+    return ctx.reply('Restore failed midway: ' + String(e?.message || e).slice(0, 200) + '. Command files restored so far stay in place; archived versions are under data/cmd-history.');
+  }
+}
+
+// ---- Event alerts (secured inbound webhook) -------------------------------
+async function runEventSetup(ctx) {
+  if (ctx.isGroup) return ctx.reply('Event setup is private - use our private chat.');
+  const tok = String(process.env.JARVIS_EVENT_TOKEN || '').trim();
+  if (!tok) return ctx.reply('JARVIS_EVENT_TOKEN is not set on the server yet - ask me to finish the setup first.');
+  const port = Number(process.env.DASHBOARD_PORT || 0);
+  if (!port) return ctx.reply('The dashboard port is not exposed on this host (DASHBOARD_PORT unset), so external alerts cannot reach me. An uptime monitor can also just watch the panel URL instead.');
+  const base = process.env.DASHBOARD_URL || ('http://<server-address>:' + port);
+  await ctx.reply('Event alerts endpoint (keep private):\nPOST ' + base + '/agent-event\nAuthorization: Bearer ' + tok + '\nBody: {"text":"your alert"}\nHealth check for uptime monitors: GET ' + base + '/healthz (no token).\nNote: I can only receive alerts from services you configure - I cannot watch my own outages from inside.');
+}
 export default {
   name: 'agent',
   aliases: ['do', 'plan'],
@@ -1006,6 +1636,20 @@ export default {
       const um = goal.match(/^unschedule\s+(\w+)$/i);
       if (um) return runUnschedule(ctx, um[1]);
       if (/^(schedules|list schedules)$/i.test(goal)) return runListSchedules(ctx);
+      const rm = goal.match(/^repair\s+(\w+)$/i); if (rm) return runRepairRoute(ctx, rm[1]);
+      if (/^health$/i.test(goal)) return runHealth(ctx);
+      if (/^quota$/i.test(goal)) return runQuota(ctx);
+      if (/^permissions$/i.test(goal)) return runPermissions(ctx);
+      const dm = goal.match(/^(disable|enable)\s+cmd\s+(\w+)$/i); if (dm) return runCmdToggle(ctx, dm[1], dm[2]);
+      const hm = goal.match(/^history\s+(\w+)$/i); if (hm) return runHistory(ctx, hm[1]);
+      const dfm = goal.match(/^diff\s+(\w+)\s+(\d+)$/i); if (dfm) return runDiff(ctx, dfm[1], +dfm[2]);
+      const rcm = goal.match(/^restore\s+cmd\s+(\w+)\s+(\d+)$/i); if (rcm) return runRestoreCmd(ctx, rcm[1], +rcm[2]);
+      const psm = goal.match(/^(pause|resume)\s+schedule\s+(\w+)$/i); if (psm) return runPauseSchedule(ctx, psm[1], psm[2]);
+      const rsm = goal.match(/^reschedule\s+(\w+)\s+to\s+(.+)$/i); if (rsm) return runReschedule(ctx, rsm[1], rsm[2]);
+      if (/^recovery kit$/i.test(goal)) return runRecoveryKit(ctx);
+      if (/^restore$/i.test(goal)) return runRestore(ctx);
+      if (/^event setup$/i.test(goal)) return runEventSetup(ctx);
+      const stym = goal.match(/^reply style\s+(.+)$/i); if (stym) return runReplyStyle(ctx, stym[1]);
     }
     if (!ctx.isOwner && !allow(ctx.sender, 3)) return ctx.reply('Agent mode is taking a breather. Try again in a little while.');
     if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) {
@@ -1019,6 +1663,8 @@ export default {
         return ctx.reply('🛑 Cancelled the download queue: ' + r.cancelled + ' pending item(s) cancelled.' +
           (r.active ? ' The file downloading right now will finish, then everything stops.' : ''));
       }
+      if (isMessageJobGoal(goal)) return runMessageJobFlow(ctx, goal);
+      if (isBuilderGoal(goal)) return runBuilderFlow(ctx, goal);
       return runShellMode(ctx, goal);
     }
     return runSafeMode(ctx, goal);
