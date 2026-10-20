@@ -26,7 +26,7 @@ export const PROVIDERS = [
     id: 'openrouter',
     label: 'DeepSeek V3',
     type: 'openai',
-    baseUrl: 'https://openrouter.ai/api/v1',
+    baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
     keyEnv: ['OPENROUTER_API_KEY'],
     models: () => (process.env.OPENROUTER_MODEL ? [process.env.OPENROUTER_MODEL] : ['deepseek/deepseek-chat-v3-0324:free']),
   },

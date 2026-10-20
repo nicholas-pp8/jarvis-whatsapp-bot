@@ -48,7 +48,7 @@ async function ai(prompt, opts, feature = 'general') {
   catch (e) { quotaBump('failures', feature); throw e; }
 }
 // Shared codegen rules for install/builder/repair (bodies only, no imports).
-const CODEGEN_RULES = 'Rules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load packages inside the body with await import().\n- ctx.args is the user\'s words as a string array; await ctx.reply(text) sends a plain reply; ctx.sock and ctx.jid are available for media replies; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, or files under auth/. No child_process, no shell, no writes outside /tmp and data/.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and on failure reply starting with "Error: " followed by the actual error message (first 150 chars), never a generic "failed" message. Keep it under 30 lines.\n- For multi-turn conversations you may use the sessions helper: const S = await import(\'../utils/sessions.js\'); S.begin(ctx, { cmd: \'name\', ttlMs: 300000, state: {}, onText: async (sctx, text, end) => { /* handle each reply; call end() when done */ } }); sctx has reply, jid, state.';
+const CODEGEN_RULES = 'Rules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load packages inside the body with await import().\n- ctx.args is the user\'s words as a string array; await ctx.reply(text) sends a plain reply; ctx.sock and ctx.jid are available for media replies; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, files under auth/, or data files like api-keys.json, dashboard-token, install-id, session-state.json. No child_process, no shell, no eval/new Function, no writes outside /tmp and data/. Only https URLs, never local or private addresses. Reply ONLY via ctx.reply or ctx.sock.sendMessage(ctx.jid, ...) - never hardcode a number or chat id.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and on failure reply starting with "Error: " followed by the actual error message (first 150 chars), never a generic "failed" message. Keep it under 30 lines.\n- For multi-turn conversations you may use the sessions helper: const S = await import(\'../utils/sessions.js\'); S.begin(ctx, { cmd: \'name\', ttlMs: 300000, state: {}, onText: async (sctx, text, end) => { /* handle each reply; call end() when done */ } }); sctx has reply, jid, state.';
 const MAX_STEPS = 5, MAX_GOAL = 300, MAX_ARG = 120, SH_STEPS = 15, SH_EXEC_CAP = 100;
 
 function resolveCmd(name) {
@@ -270,6 +270,7 @@ export async function handlePendingAnswer(ctx, isYes) {
   if (p.kind === 'template') return runTemplateConfirmed(ctx, p);
   if (p.kind === 'apicmd') return runApiCmdConfirmed(ctx, p);
   if (p.kind === 'restorecmd') return runRestoreCmdConfirmed(ctx, p);
+  if (p.kind === 'repaircmd') return runRepairConfirmed(ctx, p);
   if (p.kind === 'restore') return runRestoreConfirmed(ctx, p);
   await ctx.reply('Confirmed - taking a backup first, then running ' + (p.cmds.length + (p.restarts || 0)) + ' action(s)...');
   const { backup, results } = await shell.runStaged(p);
@@ -387,12 +388,19 @@ async function probeExports(pkg) {
   const r = await shell.execShell('node --input-type=module -e "' + script + '" ' + JSON.stringify(pkg), { timeoutMs: 60000 });
   try { return JSON.parse((r.out || '').trim().split('\n').pop()); } catch { return {}; }
 }
-function bodyProblem(b) {
+export function bodyProblem(b) {
   if (!b) return 'the AI returned nothing';
   if (/export\s+default|module\.exports/.test(b)) return 'it included export statements (inner statements only, no exports)';
   if (/^\s*import\s/m.test(b)) return 'it used import statements (load the package with await import() inside the body instead)';
   if (/\brequire\s*\(/.test(b)) return 'it used require() (use await import() inside the body instead)';
   if (/process\.env|auth\/|auth-backup|\.env\b|child_process|\bexecSync\b|\bspawn\b/.test(b)) return 'it touched env/secrets/shell (not allowed)';
+  if (/\beval\s*\(|new\s+Function\s*\(/.test(b)) return 'it used eval/Function (not allowed)';
+  if (/api-keys|dashboard-token|install-id|session-state/.test(b)) return 'it touched sensitive data files (not allowed)';
+  if (/@s\.whatsapp\.net|@g\.us|@broadcast|@newsletter/.test(b)) return 'it named a specific chat or number (generated code must only reply to the calling chat)';
+  if (/sendMessage\s*\(\s*(?!ctx\.jid\b|sctx\.jid\b)/.test(b)) return 'it messaged a chat other than the caller (ctx.reply or ctx.jid only)';
+  if (/169\.254\.|127\.0\.0\.1|\blocalhost\b|0\.0\.0\.0|\[::1\]|\b10\.\d+\.\d+\.\d+|192\.168\.|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|metadata\.google/.test(b)) return 'it targeted a local or private network address (not allowed)';
+  if (/['"`]http:\/\//.test(b)) return 'it used plain http (https only)';
+  if (/(?:writeFileSync|appendFileSync|createWriteStream|mkdirSync|rmSync|unlinkSync|renameSync|copyFileSync|cpSync)\s*\(\s*['"`](?!\/tmp[\/'"]|data[\/'"])/.test(b)) return 'it wrote outside data/ and /tmp (not allowed)';
   return null;
 }
 async function runInstallConfirmed(ctx, p) {
@@ -1065,7 +1073,7 @@ function repairBudgetUse(name) {
 
 /** Rewrite a generated command to fix a runtime error. Same gates as install:
  *  safety scan, node --check, usage-only self-test (no side effects). */
-async function repairCommand(name, errMsg) {
+export async function repairCommand(name, errMsg, { apply = true } = {}) {
   const entry = getGenerated(name);
   if (!entry) return { ok: false, why: '/' + name + ' was not generated by me, so I will not rewrite it automatically.' };
   const file = path.join('src', 'commands', name + '.js');
@@ -1110,6 +1118,7 @@ async function repairCommand(name, errMsg) {
   } catch (e) {
     return { ok: false, why: 'the fix failed its load test (' + String(e?.message || e).slice(0, 80) + ')' };
   } finally { try { fs.unlinkSync(stFile); } catch {} }
+  if (!apply) return { ok: true, applied: false, body };
   archiveVersion(name);
   fs.writeFileSync(file, candidate);
   noteGenerated(name, { repairs: (entry.repairs || 0) + 1, lastError: String(errMsg).slice(0, 200) });
@@ -1121,7 +1130,33 @@ async function repairCommand(name, errMsg) {
     return { ok: false, why: 'fix written but reload failed (' + String(e?.message || e).slice(0, 80) + ') - a restart will load it' };
   }
   shell.audit('REPAIR /' + name + ' fixed err="' + String(errMsg).slice(0, 80) + '" (repair #' + ((entry.repairs || 0) + 1) + ')');
-  return { ok: true };
+  return { ok: true, applied: true };
+}
+
+export async function runRepairConfirmed(ctx, p) {
+  const { name, body } = p.repaircmd || {};
+  const entry = name && getGenerated(name);
+  if (!entry) return ctx.reply('That prepared repair is no longer valid (the command is gone) - nothing was applied.');
+  if (bodyProblem(body)) return ctx.reply('The prepared fix no longer passes the safety scan - nothing was applied.');
+  const candidate = buildCommandFile(name, { desc: (entry.pkg || name) + ' helper', usage: entry.usage || '<input>', minArgs: entry.minArgs ?? 1, body });
+  const chkFile = path.join('src', 'commands', '_chk-repair-' + name + '.mjs');
+  try {
+    fs.writeFileSync(chkFile, candidate);
+    const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
+    if (chk.code !== 0) return ctx.reply('The prepared fix no longer passes its syntax check - nothing was applied.');
+  } finally { try { fs.unlinkSync(chkFile); } catch {} }
+  const file = path.join('src', 'commands', name + '.js');
+  archiveVersion(name);
+  fs.writeFileSync(file, candidate);
+  noteGenerated(name, { repairs: (entry.repairs || 0) + 1 });
+  try {
+    const mod = await import('./' + name + '.js?t=' + Date.now());
+    registry.register(mod.default);
+  } catch (e) {
+    return ctx.reply('Fix written but reload failed (' + String(e?.message || e).slice(0, 80) + ') - a restart will load it.');
+  }
+  shell.audit('REPAIR-CONFIRMED /' + name + ' (owner YES)');
+  return ctx.reply('🔧 Repaired /' + name + ' and it is live now. Rollback: "/agent history ' + name + '".');
 }
 
 async function runRepairRoute(ctx, name) {
@@ -1150,9 +1185,10 @@ export async function repairWatchTick() {
       if (!getGenerated(f.cmd) || !repairBudgetOk(f.cmd)) continue;
       repairBudgetUse(f.cmd);
       shell.audit('REPAIR auto attempt /' + f.cmd + ' err="' + f.err.slice(0, 80) + '"');
-      const r = await repairCommand(f.cmd, f.err);
+      const r = await repairCommand(f.cmd, f.err, { apply: false });
       if (r.ok) {
-        await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair: /' + f.cmd + ' was failing ("' + f.err.slice(0, 100) + '"). I rewrote it and it passes the load test now - try it again. If it still fails, I will not auto-retry it today.' }).catch(() => {});
+        shell.stage([], { kind: 'repaircmd', repaircmd: { name: f.cmd, body: r.body } });
+        await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair PREPARED for /' + f.cmd + ' (was failing: "' + f.err.slice(0, 100) + '"). The fix passed the safety scan and load test, but I will not apply it without your OK. Reply YES within 5 minutes to apply it, or NO to discard. I will not auto-prepare another fix for this command today.' }).catch(() => {});
       } else {
         await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair: /' + f.cmd + ' failed but I could not fix it automatically (' + r.why.slice(0, 150) + '). Original error: ' + f.err.slice(0, 100) }).catch(() => {});
       }
