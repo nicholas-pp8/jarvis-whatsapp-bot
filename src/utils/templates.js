@@ -90,25 +90,11 @@ try {
   });
   if (!qs.length) throw new Error('no questions returned');
   const state = { qs, i: 0, score: 0 };
-  const ask = async (reply) => {
-    const cur = state.qs[state.i];
-    await reply('Q' + (state.i + 1) + '/' + state.qs.length + ': ' + cur.q + '\\n' + cur.answers.map((a, j) => (j + 1) + '. ' + a).join('\\n'));
-  };
-  const started = S.begin(ctx, {
-    cmd: 'CMDNAME', ttlMs: 5 * 60e3, state,
-    onText: async (sctx, text, end) => {
-      const cur = state.qs[state.i];
-      const pick = cur.answers[parseInt(String(text).trim(), 10) - 1] || String(text).trim();
-      if (pick && pick.toLowerCase() === cur.correct.toLowerCase()) { state.score++; await sctx.reply('Correct!'); }
-      else await sctx.reply('Wrong - it was: ' + cur.correct);
-      state.i++;
-      if (state.i >= state.qs.length) { await sctx.reply('Quiz over! Score: ' + state.score + '/' + state.qs.length); end(); return; }
-      await ask(sctx.reply);
-    },
-  });
+  const started = S.begin(ctx, { cmd: 'CMDNAME', ttlMs: 15 * 60e3, handlerKey: 'quiz', state });
   if (!started) throw new Error('could not start the quiz session');
-  await ctx.reply('Quiz starting - answer with 1-4. (If I restart mid-quiz, the session is lost.)');
-  await ask(ctx.reply);
+  await ctx.reply('Quiz starting - answer with 1-4. Progress is saved: if I restart mid-quiz, your next answer continues where you left off (within 15 min).');
+  const first = state.qs[0];
+  await ctx.reply('Q1/' + state.qs.length + ': ' + first.q + '\\n' + first.answers.map((a, j) => (j + 1) + '. ' + a).join('\\n'));
 } catch (e) { await ctx.reply('Error: ' + String(e && e.message || e).slice(0, 150)); }`,
   },
   dice: {

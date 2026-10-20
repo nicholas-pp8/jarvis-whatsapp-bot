@@ -623,6 +623,17 @@ function taskCheckpoint(id, transcript) {
 }
 // On boot: any task left 'running' was interrupted. Resume it once; if it is
 // interrupted again, mark it abandoned and tell the owner what was left over.
+// Pure resume decision (exported for tests): resume a running task once;
+// a task already resumed once is marked abandoned. Mutates and returns via lists.
+export function decideResume(list) {
+  const toResume = [], abandoned = [];
+  for (const task of list.filter((x) => x.status === 'running')) {
+    if ((task.resumeCount || 0) < 1) { task.resumeCount = (task.resumeCount || 0) + 1; toResume.push(task); }
+    else { task.status = 'abandoned'; task.finishedAt = Date.now(); abandoned.push(task); }
+  }
+  return { toResume, abandoned };
+}
+
 function initTaskResume() {
   const stale = loadTasks().filter((t) => t.status === 'running');
   if (!stale.length) return;
@@ -631,11 +642,7 @@ function initTaskResume() {
     if (!s) return;
     clearInterval(timer);
     const list = loadTasks();
-    const toResume = [], abandoned = [];
-    for (const task of list.filter((x) => x.status === 'running')) {
-      if ((task.resumeCount || 0) < 1) { task.resumeCount = (task.resumeCount || 0) + 1; toResume.push(task); }
-      else { task.status = 'abandoned'; task.finishedAt = Date.now(); abandoned.push(task); }
-    }
+    const { toResume, abandoned } = decideResume(list);
     saveTasks(list);
     const own = ownerDM();
     for (const task of abandoned) {
