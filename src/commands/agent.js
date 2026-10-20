@@ -641,6 +641,12 @@ function initTaskResume() {
     const s = getSock();
     if (!s) return;
     clearInterval(timer);
+    await resumeInterruptedTasks(s);
+  }, 15000);
+  timer.unref?.();
+}
+
+export async function resumeInterruptedTasks(s) {
     const list = loadTasks();
     const { toResume, abandoned } = decideResume(list);
     saveTasks(list);
@@ -666,8 +672,6 @@ function initTaskResume() {
         catch (e) { logger.warn('[agent] task resume failed: ' + (e?.message || 'error')); }
       }
     }
-  }, 15000);
-  timer.unref?.();
 }
 
 // ---- Health watch ---------------------------------------------------------
@@ -1132,8 +1136,7 @@ async function runRepairRoute(ctx, name) {
   return ctx.reply('I could not repair /' + name + ': ' + r.why + ' Nothing was changed. (Rollback options: "/agent history ' + name + '".)');
 }
 
-function initRepairWatch() {
-  const tick = async () => {
+export async function repairWatchTick() {
     const cursor = loadJson(REPAIR_CURSOR_FILE, { ts: Date.now() });
     const fails = readFailures(cursor.ts);
     saveJson(REPAIR_CURSOR_FILE, { ts: Date.now() });
@@ -1154,8 +1157,10 @@ function initRepairWatch() {
         await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair: /' + f.cmd + ' failed but I could not fix it automatically (' + r.why.slice(0, 150) + '). Original error: ' + f.err.slice(0, 100) }).catch(() => {});
       }
     }
-  };
-  const t = setInterval(() => { tick().catch((e) => logger.warn('[agent] repair watch: ' + (e?.message || 'error'))); }, 90e3);
+}
+
+function initRepairWatch() {
+  const t = setInterval(() => { repairWatchTick().catch((e) => logger.warn('[agent] repair watch: ' + (e?.message || 'error'))); }, 90e3);
   t.unref?.();
 }
 try { initRepairWatch(); } catch (e) { logger.warn('[agent] repair-watch init: ' + (e?.message || 'error')); }
@@ -1169,7 +1174,7 @@ function riskLabel(code) {
   return 'local';
 }
 
-async function runHealth(ctx) {
+export async function runHealth(ctx) {
   const fails = readFailures(Date.now() - 7 * 24 * 3600e3);
   const byCmd = {};
   for (const f of fails) byCmd[f.cmd] = (byCmd[f.cmd] || 0) + 1;
@@ -1196,14 +1201,14 @@ async function runHealth(ctx) {
   await ctx.reply(lines.join('\n'));
 }
 
-async function runQuota(ctx) {
+export async function runQuota(ctx) {
   const q = loadJson(QUOTA_FILE, null);
   if (!q || !q.day) return ctx.reply('No /agent AI calls recorded today yet.');
   const feats = Object.entries(q.byFeature || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + ': ' + v).join(', ');
   await ctx.reply('Today\'s /agent AI usage (my own counters, estimates only - the providers\' real quotas live on their side):\n- Calls: ' + q.calls + '\n- Failed calls: ' + (q.failures || 0) + '\n- By feature: ' + (feats || 'none') + '\nFree-tier providers (Gemini/Cohere) apply their own daily limits; when one runs out, calls start failing and you will see it here.');
 }
 
-async function runPermissions(ctx) {
+export async function runPermissions(ctx) {
   const gen = loadGenerated();
   if (!gen.length) return ctx.reply('No generated commands yet.');
   const flags = loadJson(path.join('data', 'command-flags.json'), { disabled: [] });
@@ -1218,7 +1223,7 @@ async function runPermissions(ctx) {
   await ctx.reply(lines.join('\n'));
 }
 
-async function runCmdToggle(ctx, action, name) {
+export async function runCmdToggle(ctx, action, name) {
   name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
   if (!registry.get(name)) return ctx.reply('No command called /' + name + '.');
   const f = path.join('data', 'command-flags.json');
@@ -1234,7 +1239,7 @@ async function runCmdToggle(ctx, action, name) {
   await ctx.reply('/' + name + ' is now ' + (action.toLowerCase() === 'disable' ? 'DISABLED (everyone, until you enable it)' : 'enabled again') + '.');
 }
 
-async function runHistory(ctx, name) {
+export async function runHistory(ctx, name) {
   name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
   const versions = listVersions(name);
   if (!versions.length) return ctx.reply('No saved versions for /' + name + '.');
@@ -1249,7 +1254,7 @@ async function runHistory(ctx, name) {
   await ctx.reply(lines.join('\n'));
 }
 
-async function runDiff(ctx, name, n) {
+export async function runDiff(ctx, name, n) {
   name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
   const versions = listVersions(name);
   const recent = versions.slice(-5).reverse();
@@ -1262,7 +1267,7 @@ async function runDiff(ctx, name, n) {
   await ctx.reply('Diff of /' + name + ': version ' + n + ' vs current (--- old, +++ current):\n' + (r.out || '(identical)' || '').slice(0, 3000));
 }
 
-async function runRestoreCmd(ctx, name, n) {
+export async function runRestoreCmd(ctx, name, n) {
   name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
   const versions = listVersions(name);
   const pick = versions.slice(-5).reverse()[n - 1];
@@ -1272,7 +1277,7 @@ async function runRestoreCmd(ctx, name, n) {
   await ctx.reply('Restore /' + name + ' to version ' + n + ' (' + pick.replace('.js', '') + ')? The current version is archived first. Reply YES within 5 minutes to go ahead, or NO to cancel.');
 }
 
-async function runRestoreCmdConfirmed(ctx, p) {
+export async function runRestoreCmdConfirmed(ctx, p) {
   const { name, file } = p.restorecmd;
   try {
     archiveVersion(name);
@@ -1292,7 +1297,7 @@ function replyStyle() {
   const s = loadJson(STYLE_FILE, null);
   return s && s.style ? s.style : '';
 }
-async function runReplyStyle(ctx, text) {
+export async function runReplyStyle(ctx, text) {
   const style = String(text || '').slice(0, 150).trim();
   if (/^(default|reset)$/i.test(style)) {
     saveJson(STYLE_FILE, {});
@@ -1349,7 +1354,7 @@ async function fetchNewsItems(topic) {
   return items;
 }
 
-async function runMessageJob(entry) {
+export async function runMessageJob(entry) {
   const s = getSock();
   if (!s) return;
   shell.audit('MSGJOB fired id=' + entry.id + ' topic="' + entry.topic + '"');
