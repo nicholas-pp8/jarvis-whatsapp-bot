@@ -8,7 +8,7 @@ const FLAGS = ['agent', 'memory', 'automod', 'automation', 'voice', 'plugins',
   'uno', 'pets', 'werewolf', 'statusreact', 'anticall', 'autobio',
   'joinreq', 'rpg', 'antilinkx', 'antipromote', 'privacy', 'gitclone',
   'mediafire', 'emojimix', 'autoreact', 'runcode', 'webinspect', 'getdevice',
-  'getabout', 'rankcard', 'autosticker', 'football', 'stickersearch', 'numerology', 'colorcode'];
+  'getabout', 'rankcard', 'autosticker', 'football', 'stickersearch', 'numerology', 'colorcode', 'ownershell'];
 export function featOn(name) {
   const v = String(process.env['JARVIS_FEAT_' + String(name).toUpperCase()] ?? 'on').trim().toLowerCase();
   return !['off', '0', 'false', 'no'].includes(v);

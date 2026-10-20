@@ -161,6 +161,35 @@ const text = extractText(msg.message);
       } catch { /* never block */ }
       }
     }
+    // ownershell-yesno: verified owner DM confirms staged destructive actions
+    if (!msg.key.fromMe && text && kind === 'private') {
+      const t = String(text).trim();
+      if (/^(yes|no)$/i.test(t)) {
+        try {
+          const sh = await import('../utilities/ownershell.js');
+          if (sh.getPending()) {
+            const identity = await resolveSenderIdentity(sock, msg, kind);
+            const jid2 = msg.key.remoteJid;
+            const gate = { isOwner: ownerIdentity(identity, kind, config.ownerNumber, sock.user?.id || ''), isGroup: jid2.endsWith('@g.us'), jid: jid2, sender: identity.phoneNumber || jidToNumber(identity.senderJid), msg };
+            if (sh.isVerifiedOwnerDM(gate)) {
+              if (/^no$/i.test(t)) {
+                sh.clearPending();
+                await sock.sendMessage(jid2, { text: 'Cancelled. Nothing was changed.' }, { quoted: msg });
+              } else {
+                const p = sh.getPending(); sh.clearPending();
+                await sock.sendMessage(jid2, { text: 'Confirmed - running ' + p.cmds.length + ' action(s) with a backup first...' }, { quoted: msg });
+                const { backup, results } = await sh.runStaged(p);
+                const done = 'Done. Backup: ' + (backup || 'none (nothing existed to back up)') + '\n' +
+                  results.map((r, i) => (i + 1) + '. $ ' + r.cmd.slice(0, 60) + ' -> exit ' + r.code).join('\n');
+                const outs = results.map((r) => r.out).filter(Boolean).join('\n---\n').slice(0, 2500);
+                await sock.sendMessage(jid2, { text: done + (outs ? '\n\n' + outs : '') }, { quoted: msg });
+              }
+              return;
+            }
+          }
+        } catch { /* never block normal messages */ }
+      }
+    }
     let parsed = parseCommand(text);
     if (!parsed && !msg.key.fromMe && text && (kind === 'group' || kind === 'private')) logChat(msg.key.remoteJid, msg.pushName || jidToNumber(senderOf(msg, kind)), text);
     if (!parsed && !msg.key.fromMe && text && (kind === 'group' || kind === 'private')) { try { if (featOn('memory')) { const { userMemory } = await import('../ops/index.js'); userMemory.learn(jidToNumber(senderOf(msg, kind)), text, msg.pushName); } } catch {} }
