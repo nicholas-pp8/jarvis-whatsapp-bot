@@ -177,9 +177,13 @@ const text = extractText(msg.message);
                 await sock.sendMessage(jid2, { text: 'Cancelled. Nothing was changed.' }, { quoted: msg });
               } else {
                 const p = sh.getPending(); sh.clearPending();
-                await sock.sendMessage(jid2, { text: 'Confirmed - running ' + p.cmds.length + ' action(s) with a backup first...' }, { quoted: msg });
-                const { backup, results } = await sh.runStaged(p);
-                const done = 'Done. Backup: ' + (backup || 'none (nothing existed to back up)') + '\n' +
+                await sock.sendMessage(jid2, { text: 'Confirmed - running ' + p.cmds.length + ' action(s) now...' }, { quoted: msg });
+                const { backup, backupFailed, results } = await sh.runStaged(p);
+                if (backupFailed) {
+                  await sock.sendMessage(jid2, { text: 'Aborted - the safety backup could not be created, so nothing was run. Check disk space, then try again.' }, { quoted: msg });
+                  return;
+                }
+                const done = 'Done. Backup: ' + (backup || 'none needed (no existing files were touched)') + '\n' +
                   results.map((r, i) => (i + 1) + '. $ ' + r.cmd.slice(0, 60) + ' -> exit ' + r.code).join('\n');
                 const outs = results.map((r) => r.out).filter(Boolean).join('\n---\n').slice(0, 2500);
                 await sock.sendMessage(jid2, { text: done + (outs ? '\n\n' + outs : '') }, { quoted: msg });

@@ -272,15 +272,16 @@ export async function handlePendingAnswer(ctx, isYes) {
   if (p.kind === 'restorecmd') return runRestoreCmdConfirmed(ctx, p);
   if (p.kind === 'repaircmd') return runRepairConfirmed(ctx, p);
   if (p.kind === 'restore') return runRestoreConfirmed(ctx, p);
-  await ctx.reply('Confirmed - taking a backup first, then running ' + (p.cmds.length + (p.restarts || 0)) + ' action(s)...');
-  const { backup, results } = await shell.runStaged(p);
+  await ctx.reply('Confirmed - running ' + (p.cmds.length + (p.restarts || 0)) + ' action(s) now.');
+  const { backup, backupFailed, results } = await shell.runStaged(p);
+  if (backupFailed) return ctx.reply('Aborted - the safety backup could not be created, so nothing was run. Check disk space, then try again.');
   lastRaw = { ts: Date.now(), text: results.map((r) => '$ ' + r.cmd + ' (exit ' + r.code + ')\n' + r.out).join('\n---\n') };
   const failed = results.filter((r) => r.code !== 0).length;
   const rawForAi = results.map((r) => r.cmd + ' -> exit ' + r.code + (r.out ? '\n' + r.out : '')).join('\n');
   let text = (results.length ? ((await summarize(rawForAi, 'Say clearly what was deleted or changed and whether it all worked.')) || fallbackSummary(results)) : 'Nothing to run.');
   if (p.note) text += '\n' + p.note;
   await ctx.reply(
-    (backup ? 'Backup saved: ' + backup + '\n' : '') +
+    (backup ? 'Backup saved: ' + backup + '\n' : 'No file backup was needed for these actions.\n') +
     (failed ? '⚠️ ' : '') + text +
     '\n(Reply "/agent raw" within 10 min to see the exact output.)');
   if (p.restarts > 0) {
@@ -421,12 +422,15 @@ export function bodyProblem(b) {
 async function runInstallConfirmed(ctx, p) {
   const { pkg, version, cmdName, desc, finalFile } = p.install;
   const tmpFile = path.join('src', 'commands', '_newcmd-' + cmdName + '.js');
-  await ctx.reply('Confirmed - installing ' + pkg + ', writing /' + cmdName + ', self-testing, then restarting...');
+  await ctx.reply('Confirmed - backing up package files, installing ' + pkg + ', writing /' + cmdName + ', self-testing, then restarting...');
+  const mb = await shell.backupManifests();
+  if (!mb) return ctx.reply('Aborted - could not back up package.json/package-lock.json first. Nothing was changed.');
+  shell.audit('INSTALL ' + pkg + ' manifest backup: ' + mb);
   const inst = await shell.execShell('npm install ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 240000 });
   shell.audit('INSTALL ' + pkg + ' -> exit ' + inst.code);
   if (inst.code !== 0) return ctx.reply('npm install failed, nothing was added:\n' + String(inst.out || '').slice(-400));
   const rollback = async (why) => {
-    await shell.execShell('npm uninstall ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 180000 });
+    await shell.execShell('cp ' + JSON.stringify(mb + '/package.json') + ' ' + JSON.stringify(mb + '/package-lock.json') + ' . && npm ci --no-audit --no-fund', { timeoutMs: 300000 });
     try { fs.unlinkSync(tmpFile); } catch {}
     shell.audit('INSTALL ' + pkg + ' rolled back: ' + why.slice(0, 120));
   };
