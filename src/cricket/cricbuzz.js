@@ -31,7 +31,7 @@ export function stateOf(info) {
   return 'live';
 }
 
-const inn = (x) => (x ? `${x.runs}${x.wickets !== undefined && x.wickets < 10 ? '/' + x.wickets : x.wickets === 10 ? ' all out' : ''}${x.overs ? ' (' + x.overs + ' ov)' : ''}` : '');
+const inn = (x) => (x ? `${x.runs ?? 0}${x.wickets !== undefined && x.wickets < 10 ? '/' + x.wickets : x.wickets === 10 ? ' all out' : ''}${x.overs ? ' (' + x.overs + ' ov)' : ''}` : '');
 function scoreLine(team, score) {
   const parts = [score?.inngs1, score?.inngs2, score?.inngs3, score?.inngs4].filter(Boolean).map(inn);
   return `${team.teamSName || team.teamName}${parts.length ? '  ' + parts.join(' & ') : ''}`;

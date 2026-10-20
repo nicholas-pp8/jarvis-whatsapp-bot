@@ -226,5 +226,12 @@
   "reminder_text_limit": "रिमाइंडरचा मजकूर 1-1000 अक्षरांचा असला पाहिजे",
   "reminder_time_limit": "रिमाइंडर पुढच्या 90 दिवसांतला असला पाहिजे",
   "reminder_delivery": "रिमाइंडर: {text}",
-  "speedtest_usage": "speedtest quick वापरा"
+  "speedtest_usage": "speedtest quick वापरा",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

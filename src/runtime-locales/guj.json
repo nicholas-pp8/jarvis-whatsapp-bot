@@ -226,5 +226,12 @@
   "reminder_text_limit": "રિમાઇન્ડરનું લખાણ 1-1000 અક્ષરનું હોવું જોઈએ",
   "reminder_time_limit": "રિમાઇન્ડર આવનારા 90 દિવસની અંદરનું હોવું જોઈએ",
   "reminder_delivery": "રિમાઇન્ડર: {text}",
-  "speedtest_usage": "speedtest quick વાપરો"
+  "speedtest_usage": "speedtest quick વાપરો",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

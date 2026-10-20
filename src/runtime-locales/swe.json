@@ -226,5 +226,12 @@
   "reminder_text_limit": "Påminnelsens text måste vara 1-1000 tecken",
   "reminder_time_limit": "Påminnelsen måste ligga inom de närmaste 90 dagarna",
   "reminder_delivery": "Påminnelse: {text}",
-  "speedtest_usage": "Använd speedtest quick"
+  "speedtest_usage": "Använd speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

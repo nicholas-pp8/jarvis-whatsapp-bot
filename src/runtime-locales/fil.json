@@ -226,5 +226,12 @@
   "reminder_text_limit": "Dapat 1-1000 character ang teksto ng paalala",
   "reminder_time_limit": "Dapat nasa loob ng susunod na 90 araw ang paalala",
   "reminder_delivery": "Paalala: {text}",
-  "speedtest_usage": "Gamitin ang speedtest quick"
+  "speedtest_usage": "Gamitin ang speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

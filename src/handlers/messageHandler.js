@@ -13,6 +13,13 @@ import { maybeAutoReply } from '../autoreply/index.js';
 import { maybeChatMode } from '../chatmodes/index.js';
 import { record as logChat } from '../chatlog/index.js';
 import { wordchainPlain } from '../commands/wordchain.js';
+import { typeracePlain } from '../commands/typerace.js';
+import { featOn } from '../config/features.js';
+import { chatModeOn } from '../utilities/chatmodes.js';
+import { award as rankAward } from '../fun/rank.js';
+import { findMedia, downloadMedia, toSticker } from '../utils/imageTools.js';
+import { getRace as typeraceActive } from '../fun/typerace.js';
+import { clearAfk, getAfk, shouldNotify, afkLine } from '../fun/afk.js';
 import { getGame as wordchainActive } from '../fun/wordchain.js';
 
 const processed = new Set();
@@ -70,9 +77,18 @@ function senderOf(msg, kind) {
   return raw || msg.key.remoteJid;
 }
 
+// Chats Jarvis never reads or answers (the owner's assistant chat). Override with IGNORE_NUMBERS=digits,comma-separated.
+const IGNORED = () => String(process.env.IGNORE_NUMBERS ?? '16508702892').split(',').map((x) => x.replace(/\D/g, '')).filter(Boolean);
+export function isIgnoredChat(msg) {
+  const list = IGNORED(); if (!list.length) return false;
+  const k = msg?.key || {};
+  return [k.remoteJid, k.remoteJidAlt, k.participant, k.participantAlt].some((j) => { const n = String(j || '').split('@')[0].split(':')[0].replace(/\D/g, ''); return n && list.includes(n); });
+}
+
 export async function handleMessage(sock, msg) {
   try {
     if (!msg?.message || !msg.key?.id) return;
+    if (isIgnoredChat(msg)) return;
     if(msg.key.fromMe&&botSent.has(msg.key.id))return;
     cacheMessage(msg);
     observe(sock, msg).catch(() => {});
@@ -97,11 +113,60 @@ const text = extractText(msg.message);
       const owners = [config.ownerNumber, jidToNumber(sock.user?.id || '')].filter(Boolean);
       const who = jidToNumber(msg.key.participantAlt || msg.key.participant || '');
       await moderate(sock, msg, owners.includes(who));
+      // AFK: welcome back the sender if they were away; answer mentions of away members.
+      if (featOn('afk')) {
+        try {
+          const back = clearAfk(msg.key.remoteJid, who);
+          if (back) await sock.sendMessage(msg.key.remoteJid, { text: '👋 Welcome back, ' + (back.name || who) + '! You were away.' }, { quoted: msg }).catch(() => {});
+          const ci = msg.message?.extendedTextMessage?.contextInfo || msg.message?.imageMessage?.contextInfo || msg.message?.videoMessage?.contextInfo;
+          const mentions = [...(ci?.mentionedJid || []), ci?.participant].filter(Boolean).map(jidToNumber);
+          for (const m of new Set(mentions)) {
+            if (m === who) continue;
+            const a = getAfk(msg.key.remoteJid, m);
+            if (a && shouldNotify(msg.key.remoteJid, m)) await sock.sendMessage(msg.key.remoteJid, { text: afkLine(a) }, { quoted: msg }).catch(() => {});
+          }
+        } catch { /* AFK must never break handling */ }
+      // XP for /rankcard (1 award per member per minute, groups only).
+      try { if (featOn('rankcard') && who) rankAward(msg.key.remoteJid, who); } catch { /* never block */ }
+      // AUTOREACT: opt-in per chat; one reaction at most every 3s per chat.
+      try {
+        if (featOn('autoreact') && chatModeOn(msg.key.remoteJid, 'autoreact')) {
+          const now2 = Date.now();
+          if (now2 - (globalThis.__lastAutoReact?.[msg.key.remoteJid] || 0) > 3000) {
+            globalThis.__lastAutoReact = { ...(globalThis.__lastAutoReact || {}), [msg.key.remoteJid]: now2 };
+            const pool = ['❤️', '😂', '👍', '🔥', '😮', '👏', '😍', '💯'];
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: pool[Math.floor(Math.random() * pool.length)], key: msg.key } }).catch(() => {});
+          }
+        }
+      } catch { /* never block */ }
+      // AUTOSTICKER: opt-in per chat; images/short videos come back as stickers (max 1 per member per 10s).
+      try {
+        if (featOn('autosticker') && chatModeOn(msg.key.remoteJid, 'autosticker')) {
+          const dm = msg.message?.ephemeralMessage?.message || msg.message || {};
+          if (!dm.imageMessage && !dm.videoMessage) throw null; // only the sender's own media
+          const found = findMedia(msg);
+          if (found && ['image', 'video'].includes(found.type)) {
+            const k2 = msg.key.remoteJid + '|' + who;
+            const now3 = Date.now();
+            if (now3 - (globalThis.__lastAutoSticker?.[k2] || 0) > 10000) {
+              globalThis.__lastAutoSticker = { ...(globalThis.__lastAutoSticker || {}), [k2]: now3 };
+              const buf = await downloadMedia(sock, found);
+              if (buf && buf.length <= 8 * 1024 * 1024) {
+                const webp = await toSticker(buf, { animated: found.type === 'video' });
+                await sock.sendMessage(msg.key.remoteJid, { sticker: webp }, { quoted: msg }).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch { /* never block */ }
+      }
     }
     let parsed = parseCommand(text);
     if (!parsed && !msg.key.fromMe && text && (kind === 'group' || kind === 'private')) logChat(msg.key.remoteJid, msg.pushName || jidToNumber(senderOf(msg, kind)), text);
+    if (!parsed && !msg.key.fromMe && text && (kind === 'group' || kind === 'private')) { try { if (featOn('memory')) { const { userMemory } = await import('../ops/index.js'); userMemory.learn(jidToNumber(senderOf(msg, kind)), text, msg.pushName); } } catch {} }
     if(!parsed){const senderJid=kind==='self'?sock.user?.id||msg.key.remoteJid:senderOf(msg,kind);const choice=takeApkChoice(msg.key.remoteJid,jidToNumber(senderJid),text);if(choice)parsed={name:'apk',args:[choice.packageName]};}
     if (!parsed && kind === 'group' && wordchainActive(msg.key.remoteJid)) { const id = await resolveSenderIdentity(sock, msg, kind); await wordchainPlain({ sock, msg, jid: msg.key.remoteJid, sender: id.phoneNumber || jidToNumber(id.senderJid), text }); return; }
+    if (!parsed && kind === 'group' && typeraceActive(msg.key.remoteJid)) { const id = await resolveSenderIdentity(sock, msg, kind); await typeracePlain({ sock, msg, jid: msg.key.remoteJid, sender: id.phoneNumber || jidToNumber(id.senderJid), text }); return; }
     if (!parsed) { if (kind === 'group' || kind === 'private') { if (await maybeChatMode(sock, msg, kind, text)) return; await maybeAutoReply(sock, msg, kind, text); } return; } // normal chatter and bare URLs are ignored
 
     const jid = msg.key.remoteJid;
@@ -120,7 +185,7 @@ const text = extractText(msg.message);
       isGroup: jid.endsWith('@g.us'),
       isOwner: ownerIdentity(identity,kind,config.ownerNumber,sock.user?.id || ''),
       commands: registry,
-      reply: (content) => sock.sendMessage(jid, { text: content }, { quoted: msg }),
+      reply: (content, opts) => sock.sendMessage(jid, { text: content, ...(opts || {}) }, { quoted: msg }),
     };
     await handleCommand(ctx, parsed);
   } catch (err) {

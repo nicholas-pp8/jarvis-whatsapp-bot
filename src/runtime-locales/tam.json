@@ -226,5 +226,12 @@
   "reminder_text_limit": "நினைவூட்டல் உரை 1-1000 எழுத்துகள் இருக்க வேண்டும்",
   "reminder_time_limit": "நினைவூட்டல் அடுத்த 90 நாட்களுக்குள் இருக்க வேண்டும்",
   "reminder_delivery": "நினைவூட்டல்: {text}",
-  "speedtest_usage": "speedtest quick பயன்படுத்து"
+  "speedtest_usage": "speedtest quick பயன்படுத்து",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

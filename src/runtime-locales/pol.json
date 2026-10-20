@@ -226,5 +226,12 @@
   "reminder_text_limit": "Tekst przypomnienia musi mieć od 1 do 1000 znaków",
   "reminder_time_limit": "Przypomnienie musi przypadać w ciągu najbliższych 90 dni",
   "reminder_delivery": "Przypomnienie: {text}",
-  "speedtest_usage": "Użyj speedtest quick"
+  "speedtest_usage": "Użyj speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

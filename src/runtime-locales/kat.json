@@ -226,5 +226,12 @@
   "reminder_text_limit": "შეხსენების ტექსტი უნდა იყოს 1-1000 სიმბოლო",
   "reminder_time_limit": "შეხსენება უნდა იყოს მომდევნო 90 დღის ფარგლებში",
   "reminder_delivery": "შეხსენება: {text}",
-  "speedtest_usage": "გამოიყენე speedtest quick"
+  "speedtest_usage": "გამოიყენე speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

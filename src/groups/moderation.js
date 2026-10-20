@@ -6,9 +6,12 @@ import { record as recordActivity } from './activity.js';
 import { store, settings } from './store.js';
 import { out } from './limiter.js';
 import { getMeta, botMember, isAdminP, levelOf, findMember, num, LEVEL } from './perms.js';
+import { classifyFree } from '../ai/providers.js';
+import { featOn } from '../config/features.js';
 
 const recent = new Map(); // gid:user -> [{t, text}]
 const notified = new Map(); // gid:user -> last notice time
+const aiHits = new Map(); // gid -> [timestamps] (P3 rate limit)
 
 const URL_RE = /(?:https?:\/\/|www\.|chat\.whatsapp\.com\/)\S+/i;
 export function hasLink(text, whitelist = []) {
@@ -105,7 +108,7 @@ export async function moderate(sock, msg, isOwner) {
       if (until > Date.now()) { if (canDelete) await out.schedule(() => sock.sendMessage(gid, { delete: msg.key })).catch(() => {}); return; }
       const rest = { ...s.penalties }; delete rest[num(memberId)]; st.setSetting(gid, 'penalties', rest);
     }
-    if (!(s.antilink || s.antiinvite || s.antispam || s.antiflood || s.badwords)) return;
+    if (!(s.antilink || s.antiinvite || s.antispam || s.antiflood || s.badwords || s.aitoxic || s.antisticker || s.antimedia)) return;
     if (isAdminUser) return; // admins are exempt
     if (Array.isArray(s.trusted) && s.trusted.includes(num(memberId))) return; // trusted members are exempt
 
@@ -117,6 +120,12 @@ export async function moderate(sock, msg, isOwner) {
     recent.set(k, list);
     if (recent.size > 3000) recent.clear();
 
+    // ANTISTICKER / ANTIMEDIA: drop stickers (or any media) from non-admins.
+    const mm = msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || msg.message || {};
+    const isSticker = !!mm.stickerMessage;
+    const isMedia = isSticker || !!mm.imageMessage || !!mm.videoMessage || !!mm.audioMessage || !!mm.documentMessage;
+    if (s.antimedia && isMedia) return strike(sock, msg, gid, memberId, 'moderation_media', s, canDelete);
+    if (s.antisticker && isSticker) return strike(sock, msg, gid, memberId, 'moderation_sticker', s, canDelete);
     if (s.antiinvite && /chat\.whatsapp\.com\/[A-Za-z0-9]+/i.test(text)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
     if (s.antilink && s.linkMode !== 'invites' && hasLink(text, s.linkWhitelist)) return strike(sock, msg, gid, memberId, 'moderation_links', s, canDelete);
     if (s.badwords) {
@@ -133,6 +142,25 @@ export async function moderate(sock, msg, isOwner) {
     if (s.antiflood) {
       const burst = list.filter((x) => now - x.t < s.floodWindow * 1000).length;
       if (burst > s.floodLimit) return strike(sock, msg, gid, memberId, 'moderation_fast', s, canDelete);
+    }
+    // P3: AI abuse detection. Off unless a group admin turns /aitoxic on. Free classifiers only,
+    // rate-limited per group (max 20 checks/hour, min 3s apart) so it never burns quota.
+    if (s.aitoxic && featOn('automod') && text.length >= 20 && text.length <= 500) {
+      const hits = (aiHits.get(gid) || []).filter((t) => now - t < 3600e3);
+      const recentHit = hits.length && now - hits[hits.length - 1] < 3000;
+      if (hits.length < 20 && !recentHit) {
+        hits.push(now); aiHits.set(gid, hits);
+        if (aiHits.size > 2000) aiHits.clear();
+        try {
+          const verdict = await classifyFree(
+            'You are a strict group-chat moderator. Reply with exactly one word: YES if the message is abusive, hateful, harassing, or severe personal insults (in any language, including Hinglish); otherwise NO.',
+            text, { timeoutMs: 12000 });
+          if (verdict && /^\s*yes/i.test(verdict)) {
+            logger.info(`[groups] AI moderation strike in ${gid} for: ${text.slice(0, 60)}`);
+            return strike(sock, msg, gid, memberId, 'moderation_toxic', s, canDelete);
+          }
+        } catch (e) { logger.warn(`[groups] AI moderation failed: ${String(e.message).slice(0, 80)}`); }
+      }
     }
   } catch (err) {
     logger.warn(`[groups] moderation error: ${String(err.message).slice(0, 100)}`);

@@ -41,18 +41,28 @@ export async function download(url, { kind, dir, onProgress }) {
   if (!clean) throw new DownloadError('❌ That does not look like a valid YouTube video link.', { code: 'INVALID' });
 
   const maxMb = Math.round(config.limits.maxFileBytes / 1024 / 1024);
-  if (process.env.YT_PROVIDER !== 'ytdlp') {
-    try {
-      return await downloadViaScraper(clean, { kind, dir, onProgress });
-    } catch (e) {
-      if (e.code === 'TOO_LARGE') throw e;
-      logger.warn('[ytscraper] failed, falling back to yt-dlp');
-    }
+  // Order: yt-dlp first (direct, fast, no third party), then the converter service as a fallback. YT_PROVIDER=scraper flips the order.
+  // The scraper gets a hard time cap so a stalled third-party service can never hang the command at 0 B.
+  const scraper = async () => {
+    const cap = Math.min(config.limits.maxDownloadSeconds, 120) * 1000;
+    let timer; const stop = new Promise((_, rej) => { timer = setTimeout(() => rej(new DownloadError('The backup download service did not answer in time.', { code: 'TIMEOUT' })), cap); });
+    try { return await Promise.race([downloadViaScraper(clean, { kind, dir, onProgress }), stop]); } finally { clearTimeout(timer); }
+  };
+  const scraperFirst = process.env.YT_PROVIDER === 'scraper';
+  let scraperErr = null;
+  if (scraperFirst) {
+    try { return await scraper(); } catch (e) { if (e.code === 'TOO_LARGE') throw e; scraperErr = e; logger.warn(`[ytscraper] failed (${e.code || e.message}), trying yt-dlp`); }
   }
+  const fallbackToScraper = async (err) => {
+    if (scraperFirst || ['TOO_LARGE', 'LIVE', 'TOO_LONG', 'PRIVATE', 'INVALID'].includes(err.code)) return null;
+    try { logger.warn('[youtube] yt-dlp failed, trying backup service'); return await scraper(); } catch (e) { logger.warn(`[ytscraper] backup failed (${e.code || e.message})`); return null; }
+  };
   let meta;
   try {
     meta = await info(clean);
   } catch (err) {
+    const fb = await fallbackToScraper(err);
+    if (fb) return fb;
     throw new DownloadError(friendlyYtDlpError(err, maxMb), { code: err.code, cause: err.cause || err });
   }
   if (meta.is_live) throw new DownloadError('📡 Live streams cannot be downloaded.', { code: 'LIVE' });
@@ -65,12 +75,19 @@ export async function download(url, { kind, dir, onProgress }) {
   const max = String(config.limits.maxFileBytes);
   const args =
     kind === 'audio'
-      ? ['-f', 'bestaudio[ext=m4a]/bestaudio', '--max-filesize', max, '-o', out, clean]
-      : ['-f', `bv*[height<=${h}][ext=mp4]+ba[ext=m4a]/bv*[height<=${h}]+ba/b[height<=${h}]/b`, '--merge-output-format', 'mp4', '--max-filesize', max, '-o', out, clean];
+      ? ['-f', 'bestaudio[ext=m4a]/bestaudio/best', '--max-filesize', max, '-o', out, clean]
+      : ['-f', `bv*[height<=${h}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=${h}][ext=mp4]+ba[ext=m4a]/bv*[height<=${h}]+ba/b[height<=${h}]/b`, '--merge-output-format', 'mp4', '--max-filesize', max, '-o', out, clean];
 
   try {
-    await runYtDlp(args, { cwd: dir });
+    try { await runYtDlp(args, { cwd: dir }); } catch (first) {
+      // The tuned player-client list can return no usable formats for some videos or hosts; retry once with yt-dlp's own defaults.
+      if (['TOO_LARGE', 'LIVE', 'TOO_LONG', 'PRIVATE', 'INVALID', 'NO_TOOL', 'TIMEOUT'].includes(first.code)) throw first;
+      logger.warn(`[youtube] yt-dlp failed with tuned clients (${first.code || 'error'}), retrying with defaults`);
+      await runYtDlp(args, { cwd: dir, defaultClients: true });
+    }
   } catch (err) {
+    const fb = await fallbackToScraper(err);
+    if (fb) return fb;
     const code = err.code ?? classifyYtDlpError(err.cause?.message);
     throw new DownloadError(friendlyYtDlpError(Object.assign(err, { code }), maxMb), { code, cause: err.cause || err });
   }

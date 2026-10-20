@@ -226,5 +226,12 @@
   "reminder_text_limit": "Påmindelsens tekst skal være på 1-1000 tegn",
   "reminder_time_limit": "Påmindelsen skal ligge inden for de næste 90 dage",
   "reminder_delivery": "Påmindelse: {text}",
-  "speedtest_usage": "Brug speedtest quick"
+  "speedtest_usage": "Brug speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

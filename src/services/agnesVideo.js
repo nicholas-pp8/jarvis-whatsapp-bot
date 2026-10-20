@@ -27,7 +27,8 @@ export async function createTask(prompt, res, key) {
     {headers: {Authorization: 'Bearer ' + key}, timeout: 30000, ...NET, validateStatus: () => true});
   if (r.status === 429) throw new VideoError('rate limited', 'busy');
   if (r.status === 401 || r.status === 403) throw new VideoError('auth', 'auth');
-  if (r.status >= 300 || !r.data?.task_id) throw new VideoError('create failed ' + r.status);
+  if (r.status === 402) throw new VideoError('no balance', 'quota');
+  if (r.status >= 300 || !r.data?.task_id) throw new VideoError('create failed ' + r.status + ' ' + String(r.data?.error?.message || '').slice(0, 80), r.status >= 500 ? 'busy' : 'create');
   return r.data.task_id;
 }
 export async function waitTask(id, key, {timeoutMs = 240000, everyMs = 5000, sleep = (ms) => new Promise((s) => setTimeout(s, ms))} = {}) {

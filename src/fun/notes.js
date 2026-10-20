@@ -18,6 +18,12 @@ export function addNote(user, name, text) {
 }
 export const getNote = (user, name) => load()[user]?.[key(name)]?.text ?? null;
 export const listNotes = (user) => Object.keys(load()[user] || {}).sort();
+export const allNotes = (user) => load()[user] || {};
+export const searchNotes = (user, q) => {
+  const needle = String(q || '').toLowerCase(); const u = load()[user] || {}; const out = [];
+  for (const [k, v] of Object.entries(u)) if (k.includes(needle) || String(v.text).toLowerCase().includes(needle)) out.push([k, v.text]);
+  return out;
+};
 export function delNote(user, name) {
   const u = load()[user]; const k = key(name);
   if (!u || !u[k]) return false; delete u[k]; if (!Object.keys(u).length) delete db[user]; save(); return true;

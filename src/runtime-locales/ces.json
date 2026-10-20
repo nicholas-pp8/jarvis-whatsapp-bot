@@ -226,5 +226,12 @@
   "reminder_text_limit": "Text připomínky musí mít 1-1000 znaků",
   "reminder_time_limit": "Připomínka musí být v příštích 90 dnech",
   "reminder_delivery": "Připomínka: {text}",
-  "speedtest_usage": "Použij speedtest quick"
+  "speedtest_usage": "Použij speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

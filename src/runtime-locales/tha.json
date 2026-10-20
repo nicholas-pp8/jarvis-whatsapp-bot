@@ -226,5 +226,12 @@
   "reminder_text_limit": "ข้อความเตือนความจำต้องมี 1-1000 ตัวอักษร",
   "reminder_time_limit": "การเตือนความจำต้องอยู่ใน 90 วันข้างหน้า",
   "reminder_delivery": "เตือนความจำ: {text}",
-  "speedtest_usage": "ใช้ speedtest quick"
+  "speedtest_usage": "ใช้ speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

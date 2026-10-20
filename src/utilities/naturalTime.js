@@ -6,8 +6,15 @@ const REL=/^(?:in\s+)?((?:\d+(?:\.\d+)?\s*(?:seconds?|secs?|minutes?|mins?|hours
 const CLOCK=/^(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?=\s|$)/i;
 function clock(m){let h=Number(m[1]);const mi=m[2]?Number(m[2]):0;const ap=(m[3]||'').toLowerCase();if(mi>59)return null;if(ap){if(h<1||h>12)return null;if(ap==='pm'&&h<12)h+=12;if(ap==='am'&&h===12)h=0;}else{if(h>23)return null;if(!m[2]&&!ap)return null;}return {h,mi};}
 /** Parse "30m drink water", "in 2 hours call", "6pm call mom", "tomorrow 9am gym", "kal 7:30am ...", "monday 10am ...", "call mom at 6pm". */
+function hinglishNorm(s){
+ // "shaam 7 baje" -> "7 pm", "subah 6:30 baje" -> "6:30 am", "raat 10 baje" -> "10 pm", "dopahar 2 baje" -> "2 pm"
+ return s.replace(/\b(subah|savere|saverae|morning)\s+(\d{1,2})(?::(\d{2}))?\s*(?:baje|bajke)?\b/gi,(m,a,h,mi)=>h+(mi?':'+mi:'')+' am')
+        .replace(/\b(dopahar|afternoon)\s+(\d{1,2})(?::(\d{2}))?\s*(?:baje|bajke)?\b/gi,(m,a,h,mi)=>h+(mi?':'+mi:'')+' pm')
+        .replace(/\b(shaam|sham|evening|raat|rat|night)\s+(\d{1,2})(?::(\d{2}))?\s*(?:baje|bajke)?\b/gi,(m,a,h,mi)=>h+(mi?':'+mi:'')+' pm')
+        .replace(/\b(\d{1,2}(?::\d{2})?)\s*baje\b/gi,'$1');
+}
 export function parseReminder(args,now=Date.now(),tz='Asia/Kolkata'){
- let s=args.join(' ').trim();if(!s)return null;
+ let s=hinglishNorm(args.join(' ').trim());if(!s)return null;
  const base=dayjs(now).tz(tz);
  let m=REL.exec(s);
  if(m){let ms=0;for(const p of m[1].matchAll(/(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|[smhd])/gi))ms+=Number(p[1])*UNIT[p[2].toLowerCase()];if(ms<60e3)return {error:'min'};return fin(now+ms,s.slice(m[0].length));}

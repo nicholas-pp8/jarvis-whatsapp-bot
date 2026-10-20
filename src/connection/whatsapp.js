@@ -1,7 +1,9 @@
 import { getPollMessage, applyUpdates as applyPollUpdates, resume as resumePolls } from '../polls/index.js';
 import {bindPairedOwner} from '../permissions/paired-owner.js';
 import fs from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import readline from 'node:readline';
 import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import pino from 'pino';
@@ -10,8 +12,15 @@ import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { sleep } from '../utils/helpers.js';
 import { handleMessage, trackOutgoing } from '../handlers/messageHandler.js';
+import * as catchup from '../utilities/catchup.js';
+import { writeState } from '../utilities/sessionstate.js';
+import { isOn as toggleOn } from '../utilities/toggles.js';
+import { startAutobio } from '../utilities/autobio.js';
+import { backupNow } from '../utilities/authbackup.js';
+import { featOn } from '../config/features.js';
 import { getCached, cacheMessage } from '../utils/msgCache.js';
 import { observe, onRevokeKey } from '../recover/index.js';
+import { getSettings as recoverSettings, get as recoverGet } from '../recover/store.js';
 import { detectEnv } from '../telemetry/env.js';
 import { bridge, cleanCode, createHeartbeat, claimSession, createStatusBeat, createPairing, createProofRelay, loadSaved, loadTicket, redeemCode } from '../ecosystem/pairing.js';
 
@@ -92,6 +101,7 @@ bridge.start = async (code, number) => {
   return r;
 };
 
+
 export async function startWhatsApp() {
   stopping = false;
   { const c = await claimSession({ eco: config.ecosystem, authDir: config.paths.auth, dataDir: config.paths.data }); if (c.ok) logger.info('Your WhatsApp session from the pairing website was collected. No second link is needed.'); }
@@ -108,7 +118,8 @@ export async function startWhatsApp() {
   }
   // Paste-free pairing: a code from the pairing page (env PORTAL_CODE or typed here) is traded for a ticket and stored in data/.
   if (!state.creds.registered && !config.ecosystem.ticket && !loadSaved(config.paths.data)) {
-    const typed = process.env.PORTAL_CODE || (process.stdin.isTTY ? await ask('Portal code from the pairing page (press Enter to skip): ') : '');
+    // Auto-skip after 20s so an unattended restart is never stuck on this prompt.
+    const typed = process.env.PORTAL_CODE || (process.stdin.isTTY ? await Promise.race([ask('Portal code from the pairing page (press Enter to skip): '), new Promise((r) => setTimeout(() => r(''), 20_000))]) : '');
     if (cleanCode(typed)) { const r = await redeemCode({ eco: config.ecosystem, dir: config.paths.data, code: typed, number: pairingNumber }); logger[r.ok ? 'info' : 'warn'](r.ok ? 'Portal code accepted.' : 'Portal code not accepted: ' + r.why); }
   }
   let version;
@@ -118,10 +129,47 @@ export async function startWhatsApp() {
     logger.warn('Could not fetch the latest WhatsApp Web version, using the library default');
   }
   const silent = pino({ level: 'silent' });
+  // Presence audit: Baileys traces every frame it sends; log only presence/chatstate/passive/receipt tags (type only, never content).
+  const auditLog = (o, m) => {
+    try {
+      const x = String(o?.xml || '');
+      if (!x || (o?.msg || m) !== 'xml send') return;
+      const mm = x.match(/^<(presence|chatstate|iq|receipt)\b([^>]*)>/);
+      if (!mm) return;
+      if (mm[1] === 'receipt') return;
+      if (mm[1] === 'iq' && !/xmlns=["']passive["']/.test(x)) return;
+      const attrs = mm[2].replace(/name=("[^"]*"|'[^']*')/, 'name=*').trim().slice(0, 80);
+      const child = (x.match(/<(composing|paused|recording|active|passive)\b/) || [])[1] || '';
+      logger.info('[presence-audit] sent <' + mm[1] + ' ' + attrs + '> ' + child);
+    } catch (_) { /* ignore */ }
+  };
+  const noop = () => {};
+  const auditPino = { level: 'trace', trace: auditLog, debug: noop, info: noop, warn: noop, error: noop, fatal: noop, child() { return auditPino; } };
 
+  // Baileys 7.x internal creds.update listener (lib/Socket/socket.js) broadcasts a bare <presence/>
+  // (= "available") on EVERY partial creds update (prekey rotation, account sync counters, ...),
+  // not only on real renames. Its listeners cannot be removed through the event wrapper, so patch
+  // that block out of the installed lib before creating the socket. Idempotent; no-op when the lib
+  // changes shape (then the audit log simply shows the frames again). JARVIS_PRESENCE=on skips this.
+  try {
+    if (process.env.JARVIS_PRESENCE !== 'on') {
+      const req = createRequire(import.meta.url);
+      const libFile = path.join(path.dirname(req.resolve('@whiskeysockets/baileys/package.json')), 'lib', 'Socket', 'socket.js');
+      const libSrc = readFileSync(libFile, 'utf8');
+      const blockRe = /ev\.on\('creds\.update', update => \{\s*const name = update\.me\?\.name;[\s\S]*?Object\.assign\(creds, update\);(\s*\}\);)/;
+      if (blockRe.test(libSrc)) {
+        const stripped = libSrc.replace(blockRe, "ev.on('creds.update', update => {\n        Object.assign(creds, update);\n    });");
+        if (stripped !== libSrc) { writeFileSync(libFile, stripped); logger.info('[presence-guard] patched Baileys creds.update presence broadcaster out of lib/Socket/socket.js'); }
+      } else {
+        logger.info('[presence-guard] Baileys creds.update broadcaster block not found (already patched or lib changed)');
+      }
+    }
+  } catch (e) {
+    logger.warn('[presence-guard] could not patch Baileys lib: ' + (e?.message || e));
+  }
   const s = makeWASocket({
     version,
-    logger: silent,
+    logger: auditPino,
     auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, silent) },
     browser: Browsers.ubuntu('Chrome'),
     markOnlineOnConnect: false,
@@ -131,13 +179,51 @@ export async function startWhatsApp() {
     getMessage: async (key) => getCached(key?.id)?.message || getPollMessage(key?.id),
   });
   sock = s;
+  // Presence guard: never broadcast online/typing/recording unless JARVIS_PRESENCE=on.
+  // Only 'unavailable' (appear offline) is allowed through.
+  try {
+    const origPresence = s.sendPresenceUpdate?.bind(s);
+    if (origPresence) {
+      s.sendPresenceUpdate = async (type, ...rest) => {
+        if (process.env.JARVIS_PRESENCE === 'on' || type === 'unavailable') return origPresence(type, ...rest);
+        return undefined;
+      };
+    }
+  } catch (_) { /* ignore */ }
+  // (bare-presence blocking happens in patchBaileysPresenceBroadcast() before the socket is created)
+  // Baileys also sends a typeless <presence name=..> frame (counts as online) on connect/name sync; re-assert offline after it.
+  try {
+    if (process.env.JARVIS_PRESENCE !== 'on') {
+      s.ev.on('connection.update', (u) => {
+        if (u?.connection === 'open') for (const d of [1500, 5000, 15000, 45000]) setTimeout(() => { s.sendPresenceUpdate('unavailable').catch(() => {}); }, d);
+      });
+    }
+  } catch (_) { /* ignore */ }
+  // After the bot sends anything, re-assert 'unavailable' shortly after so the account does not stay marked online.
+  try {
+    if (process.env.JARVIS_PRESENCE !== 'on') {
+      const origSend = s.sendMessage.bind(s);
+      let t;
+      s.sendMessage = async (...a) => {
+        try { return await origSend(...a); } finally {
+          clearTimeout(t);
+          t = setTimeout(() => { s.sendPresenceUpdate('unavailable').catch(() => {}); }, 3000);
+        }
+      };
+    }
+  } catch (_) { /* ignore */ }
   trackOutgoing(s);
   setupPairing(s);
   try { resumePolls(s); } catch { /* polls are optional */ }
 
-  s.ev.on('creds.update', async () => {
+  s.ev.on('creds.update', async (update) => {
+    try {
+      // The removed Baileys listener used to do this merge; keep credential state current.
+      if (update && typeof update === 'object') Object.assign(s.authState.creds, update);
+    } catch (_) { /* ignore */ }
     try {
       await saveCreds();
+      const nowT = Date.now(); if (nowT - (globalThis.__abLast || 0) > 10 * 60 * 1000) { globalThis.__abLast = nowT; backupNow(); }
     } catch (err) {
       logger.error('Saving credentials failed:', err);
     }
@@ -165,7 +251,11 @@ export async function startWhatsApp() {
         reconnectAttempts = 0;
         pairingAttempts = 0;
         logger.info('WhatsApp connection established');
+        writeState('connected', { code: null });
+        startAutobio(s);
         pairing?.onLinked().catch(() => {});
+        // Run any missed/queued commands once the session has settled.
+        setTimeout(() => { if (featOn('catchup')) catchup.drain(s, handleMessage).then((n) => { if (n) logger.info(`[catchup] ran ${n} queued command(s)`); }).catch(() => {}); }, 12000);
       }
 
       if (connectionState === 'close') {
@@ -176,12 +266,15 @@ export async function startWhatsApp() {
         if (stopping) return;
         if (code === DisconnectReason.loggedOut) {
           logger.warn('Logged out from WhatsApp (session removed). Clearing saved login; a new pairing will be needed.');
+          writeState('logged_out', { code });
+          try { const { emit } = await import('../api/events/bus.js'); emit('session.revoked', { code, at: Date.now() }); } catch {}
           await wipeAuth();
           pairingNumber = config.pairingNumber || config.ownerNumber || pairingNumber;
           return setTimeout(() => startWhatsApp().catch((e) => logger.error('Restart failed:', e)), 3000);
         }
         if (code === DisconnectReason.connectionReplaced) {
           logger.error('This session was replaced by another login. Stopping.');
+          writeState('replaced', { code });
           return shutdown(1);
         }
         if (code === DisconnectReason.badSession) {
@@ -190,6 +283,7 @@ export async function startWhatsApp() {
         }
         reconnectAttempts++;
         const delay = code === DisconnectReason.restartRequired ? 500 : Math.min(60_000, 2000 * 2 ** Math.min(reconnectAttempts, 5));
+        writeState('reconnecting', { code: code ?? null });
         logger.warn(`Connection closed (code ${code ?? 'unknown'}). Reconnecting in ${Math.round(delay / 1000)}s…`);
         setTimeout(() => startWhatsApp().catch((e) => logger.error('Reconnect failed:', e)), delay);
       }
@@ -205,20 +299,62 @@ export async function startWhatsApp() {
         if (u?.update?.pollUpdates && u.key?.id) applyPollUpdates(u.key.id, u.update.pollUpdates);
         const stub = u?.update?.messageStubType;
         if ((stub === 1 || stub === 'REVOKE') && u.key?.id) await onRevokeKey(s, u.key);
+        // ANTIEDIT: someone rewrote a message we still have - show the original in the group.
+        const edited = u?.update?.message?.editedMessage;
+        if (edited && u.key?.id && featOn('antiedit') && recoverSettings().antiedit) {
+          const orig = recoverGet(u.key.id);
+          const chat = u.key.remoteJid || orig?.chat || '';
+          if (orig && orig.kind === 'msg' && chat.endsWith('@g.us')) {
+            const inner = edited.message || edited;
+            const newText = inner.conversation || inner.extendedTextMessage?.text || '';
+            const oldText = orig.text || '(a media or unsupported message)';
+            if (newText && newText !== oldText) {
+              const who = orig.who ? `${orig.who}@s.whatsapp.net` : undefined;
+              await s.sendMessage(chat, {
+                text: `✏️ @${orig.who || 'someone'} edited a message.
+
+*Before:* ${oldText.slice(0, 900)}
+*After:* ${newText.slice(0, 900)}`,
+                mentions: who ? [who] : [],
+              }).catch(() => {});
+            }
+          }
+        }
       } catch (err) { logger.warn('Delete update failed:', err.message); }
     }
   });
 
+  // ANTICALL: reject calls when the owner turned it on; the owner's own calls always ring through.
+  s.ev.on('call', async (calls) => {
+    try {
+      if (!featOn('anticall') || !toggleOn('anticall')) return;
+      for (const c of calls || []) {
+        const from = c?.from || '';
+        if (!from || from.endsWith('@g.us')) continue;
+        if (config.ownerNumber && from.split('@')[0].split(':')[0] === String(config.ownerNumber).replace(/\D/g, '')) continue;
+        await s.rejectCall(c.id, from).catch(() => {});
+        const k = 'call:' + from;
+        const now = Date.now();
+        if ((globalThis.__callNotice?.[k] || 0) < now - 3600e3) {
+          globalThis.__callNotice = { ...(globalThis.__callNotice || {}), [k]: now };
+          await s.sendMessage(from, { text: '📵 ' + config.botName + ' does not take calls. Please send a message instead.' }).catch(() => {});
+        }
+        logger.info('[anticall] rejected call from ' + from.split('@')[0]);
+      }
+    } catch (e) { logger.warn('[anticall] ' + (e?.message || 'error')); }
+  });
+
   s.ev.on('messages.upsert', async ({ messages, type }) => {
-    // Offline/history deliveries are only remembered for recovery, never run as commands.
+    // Offline/history deliveries are remembered for recovery; commands are queued for catch-up.
     if (type !== 'notify') {
-      for (const msg of messages || []) { cacheMessage(msg); observe(s, msg).catch(() => {}); }
+      for (const msg of messages || []) { cacheMessage(msg); observe(s, msg).catch(() => {}); if (featOn('catchup')) catchup.consider(msg); }
       return;
     }
     for (const msg of messages) {
       if (proofRelay && !msg.key?.fromMe) { const pt = msg.message?.conversation || msg.message?.extendedTextMessage?.text || ''; if (pt.startsWith('JARVIS-PROOF ')) { const who = String(msg.key?.remoteJid || ''); const alt = String(msg.key?.remoteJidAlt || ''); const nj = who.endsWith('@s.whatsapp.net') ? who : alt.endsWith('@s.whatsapp.net') ? alt : ''; proofRelay(pt, nj.split('@')[0]).catch(() => {}); continue; } }
       const ts = Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? 0);
-      if (ts && Date.now() / 1000 - ts > MAX_MESSAGE_AGE_S) continue; // ignore old/offline backlog
+      if (ts && Date.now() / 1000 - ts > MAX_MESSAGE_AGE_S) { if (featOn('catchup')) catchup.consider(msg); continue; } // aged out of live path: queue for catch-up
+      catchup.markDone(msg.key?.id);
       handleMessage(s, msg).catch((err) => logger.error('Unhandled message error:', err));
     }
   });

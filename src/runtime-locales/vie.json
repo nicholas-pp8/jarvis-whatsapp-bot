@@ -226,5 +226,12 @@
   "reminder_text_limit": "Nội dung lời nhắc phải dài 1-1000 ký tự",
   "reminder_time_limit": "Lời nhắc phải trong 90 ngày tới",
   "reminder_delivery": "Lời nhắc: {text}",
-  "speedtest_usage": "Dùng speedtest quick"
+  "speedtest_usage": "Dùng speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

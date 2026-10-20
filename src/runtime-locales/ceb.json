@@ -226,5 +226,12 @@
   "reminder_text_limit": "Ang teksto sa pahinumdom kinahanglan 1-1000 ka karakter",
   "reminder_time_limit": "Ang pahinumdom kinahanglan sulod sa sunod nga 90 ka adlaw",
   "reminder_delivery": "Pahinumdom: {text}",
-  "speedtest_usage": "Gamita ang speedtest quick"
+  "speedtest_usage": "Gamita ang speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

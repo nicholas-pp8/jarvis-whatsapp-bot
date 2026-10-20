@@ -226,5 +226,12 @@
   "reminder_text_limit": "রিমাইন্ডারের লেখা ১-১০০০ অক্ষরের হতে হবে",
   "reminder_time_limit": "রিমাইন্ডার পরের ৯০ দিনের মধ্যে হতে হবে",
   "reminder_delivery": "রিমাইন্ডার: {text}",
-  "speedtest_usage": "speedtest quick ব্যবহার করো"
+  "speedtest_usage": "speedtest quick ব্যবহার করো",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

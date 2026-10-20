@@ -226,5 +226,12 @@
   "reminder_text_limit": "Muistutuksen tekstin on oltava 1-1000 merkkiä",
   "reminder_time_limit": "Muistutuksen on osuttava seuraavan 90 päivän sisään",
   "reminder_delivery": "Muistutus: {text}",
-  "speedtest_usage": "Käytä speedtest quick"
+  "speedtest_usage": "Käytä speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

@@ -226,5 +226,12 @@
   "reminder_text_limit": "Xatırlatma mətni 1-1000 simvol olmalıdır",
   "reminder_time_limit": "Xatırlatma növbəti 90 gün ərzində olmalıdır",
   "reminder_delivery": "Xatırlatma: {text}",
-  "speedtest_usage": "speedtest quick istifadə et"
+  "speedtest_usage": "speedtest quick istifadə et",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

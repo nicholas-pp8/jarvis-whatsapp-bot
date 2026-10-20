@@ -226,5 +226,12 @@
   "reminder_text_limit": "Eslatma matni 1-1000 belgi bo'lishi kerak",
   "reminder_time_limit": "Eslatma keyingi 90 kun ichida bo'lishi kerak",
   "reminder_delivery": "Eslatma: {text}",
-  "speedtest_usage": "speedtest quick dan foydalan"
+  "speedtest_usage": "speedtest quick dan foydalan",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

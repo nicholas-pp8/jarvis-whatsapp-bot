@@ -11,6 +11,10 @@ export const DEFAULTS = {
   antispam: false,
   antiflood: false,
   badwords: false,
+  aitoxic: false, // P3: AI abuse detection (feature-flagged, rate-limited)
+  antisticker: false, // delete stickers from non-admins
+  antipromote: false, // demote anyone promoted (owner exempt)
+  antimedia: false, // delete all media from non-admins
   welcomeMsg: 'Welcome {user} to {group}! 👋 Type /rules to see the group rules.',
   goodbyeMsg: 'Goodbye {user} 👋',
   rules: '',

@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -57,7 +58,7 @@ const config = {
     maxFileBytes: num('MAX_FILE_SIZE_MB', 100, 1) * 1024 * 1024,
     maxDownloadSeconds: num('MAX_DOWNLOAD_TIME', 300, 10),
     maxInlineVideoBytes: num('MAX_INLINE_VIDEO_MB', 64, 1) * 1024 * 1024,
-    maxVideoHeight: num('MAX_VIDEO_HEIGHT', 480, 144),
+    maxVideoHeight: num('MAX_VIDEO_HEIGHT', 1080, 144),
     concurrent: Math.max(1, Math.floor(num('MAX_CONCURRENT_DOWNLOADS', 1, 1))),
     maxQueue: Math.floor(num('MAX_QUEUE_LENGTH', 10, 1)),
     maxJobsPerUser: Math.floor(num('MAX_JOBS_PER_USER', 2, 1)),
@@ -78,4 +79,8 @@ try {
   if (typeof saved === 'string' && saved && saved.length <= 12) config.prefix = saved;
 } catch { /* no saved prefix */ }
 
+// Send/encrypt/convert helpers write scratch files to os.tmpdir(). Point it at the bot's own temp folder
+// (cleaned on a timer) so a small or full system /tmp cannot cause ENOSPC mid-send.
+try { fsMkTmp(config.paths.temp); process.env.TMPDIR = config.paths.temp; } catch { /* keep system tmp */ }
+function fsMkTmp(d) { mkdirSync(d, { recursive: true }); }
 export default config;

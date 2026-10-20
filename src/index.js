@@ -6,23 +6,34 @@ import logger from './utils/logger.js';
 import { ensureDirs, cleanupStaleJobs } from './utils/fileManager.js';
 import { initDatabase } from './database/database.js';
 import {bootSelfTest} from './ops/selftest.js';
+import {checkFfmpegHls} from './ops/ffmpegCheck.js';
 import { loadCommands,registry,commandLoadFailures } from './handlers/commandHandler.js';
 import { startWhatsApp, shutdown } from './connection/whatsapp.js';
 import { recordCrash, readCrashes, loopDelayMs } from './ops/crashlog.js';
+import { acquireLock, releaseLock } from './utilities/instancelock.js';
+import { restoreIfNeeded, startAuthBackup } from './utilities/authbackup.js';
 
 async function main() {
+  if (!acquireLock()) { logger.error('Another Jarvis instance is already running (lock held). Refusing to start a second one - two instances would fight over the WhatsApp session.'); process.exit(1); }
+  try { await (await import('./utils/banner.js')).playBanner({ name: config.botName }); } catch {}
   logger.info(`Starting ${config.botName} (prefix "${config.prefix}", auto status view ${config.autoStatusView ? 'on' : 'off'})`);
   await ensureDirs();
   await initDatabase();
   await loadCommands();
   const languages=validateLocales();logger.info(`[i18n] registry ${languages.registered}; complete schema ${languages.complete}; partial ${languages.partial}; missing keys fall back to English`);
   const checks=bootSelfTest(registry,commandLoadFailures);if(checks.failed.length)throw new Error('Startup self-test failed: '+checks.failed.join(', '));
+  checkFfmpegHls().then((r)=>{if(r.ok)logger.info('[self-test] ffmpeg HLS ok ('+r.detail+')');else logger.error('[self-test] ffmpeg HLS check FAILED: '+r.detail+' - HLS video downloads (Pinterest etc.) will not work');}).catch(()=>{});
+  try { (await import('./utils/banner.js')).bootBox([['Commands', registry.list().length], ['Self-test', checks.pass + ' passed / ' + checks.failed.length + ' failed'], ['Locale keys', languages.registered], ['Prefix', config.prefix]]); } catch {}
   await cleanupStaleJobs(0); // anything left in temp from a previous run is abandoned
   setInterval(() => cleanupStaleJobs(), 10 * 60 * 1000).unref();
   onError(recordError);startOps();
+  try { (await import('./services/ytdlpUpdate.js')).startYtDlpUpdater(); } catch (e) { logger.warn('[ytdlp-update] not started: ' + e.message); }
   try { (await import('./dashboard/server.js')).startDashboard(registry); } catch (e) { logger.warn('[dashboard] not started: ' + e.message); }
   try { (await import('./api/server.js')).startApi(registry); } catch (e) { logger.warn('[api] not started: ' + e.message); }
   try { (await import('./telemetry/index.js')).startTelemetry(); } catch (e) { logger.warn('[telemetry] not started: ' + e.message); }
+  try { (await import('./utils/banner.js')).startTicker(); } catch {}
+  restoreIfNeeded(); // only acts when the session files are missing/corrupt
+  startAuthBackup();
   await startWhatsApp();
 }
 

@@ -226,5 +226,12 @@
   "reminder_text_limit": "Հիշեցման տեքստը պետք է լինի 1-1000 նիշ",
   "reminder_time_limit": "Հիշեցումը պետք է լինի հաջորդ 90 օրվա ընթացքում",
   "reminder_delivery": "Հիշեցում՝ {text}",
-  "speedtest_usage": "Օգտագործիր speedtest quick"
+  "speedtest_usage": "Օգտագործիր speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

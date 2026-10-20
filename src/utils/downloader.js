@@ -9,6 +9,7 @@ import { pipeline } from 'node:stream/promises';
 import config from '../config/config.js';
 import logger from './logger.js';
 import { safeFileName } from './fileManager.js';
+import { featOn } from '../config/features.js';
 
 /** Error with a message that is safe to show to a WhatsApp user. */
 export class DownloadError extends Error {
@@ -22,6 +23,13 @@ export class DownloadError extends Error {
 }
 
 /* ------------------------------ queue ------------------------------ */
+
+const numOf = (j = '') => String(j).split('@')[0].split(':')[0];
+const isOwnerUser = (userId) => { const o = numOf(config.ownerNumber || ''); return !!o && numOf(userId) === o; };
+// RAM gate for the owner "never refuse" mode: start new downloads only while RSS is
+// under the gate, so unlimited queueing can never crash the 909MB box.
+const RAM_GATE_MB = Number(process.env.JARVIS_DL_RAM_GATE_MB) || 600;
+const ramOk = () => process.memoryUsage().rss / 1048576 < RAM_GATE_MB;
 
 export class DownloadQueue {
   constructor({ concurrency, maxQueue, maxPerUser, profile }) {
@@ -46,19 +54,21 @@ export class DownloadQueue {
 
   /** Adds a job. `onQueued(position)` fires if the job has to wait. */
   add(userId, task, onQueued) {
+    const owner = isOwnerUser(userId) && featOn('dlqueue');
     const mine = this.perUser.get(userId) || 0;
-    if (mine >= this.maxPerUser) {
+    if (!owner && mine >= this.maxPerUser) {
       throw new DownloadError(`⏳ You already have ${mine} download(s) in progress. Please wait for them to finish.`, { code: 'USER_LIMIT' });
     }
-    if (this.waiting.length >= this.maxQueue) {
+    if (this.waiting.length >= (owner ? 25 : this.maxQueue)) {
       throw new DownloadError('⏳ The download queue is full right now. Please try again in a few minutes.', { code: 'QUEUE_FULL' });
     }
     this.perUser.set(userId, mine + 1);
     return new Promise((resolve, reject) => {
       const job = { task, resolve, reject, userId };
-      if (this.waiting.length || this.running >= (this.profile?.().concurrency || this.concurrency)) {
+      if (this.waiting.length || this.running >= (this.profile?.().concurrency || this.concurrency) || !ramOk()) {
         this.waiting.push(job);
         onQueued?.(this.waiting.length);
+        this.#retrySoon();
       } else {
         this.#start(job);
       }
@@ -75,8 +85,19 @@ export class DownloadQueue {
         const left = (this.perUser.get(job.userId) || 1) - 1;
         if (left <= 0) this.perUser.delete(job.userId);
         else this.perUser.set(job.userId, left);
-        while(this.waiting.length && this.running < (this.profile?.().concurrency || this.concurrency)) this.#start(this.waiting.shift());
+        while(this.waiting.length && this.running < (this.profile?.().concurrency || this.concurrency) && ramOk()) this.#start(this.waiting.shift());
+        if (this.waiting.length) this.#retrySoon();
       });
+  }
+
+  #retrySoon() {
+    if (this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      while(this.waiting.length && this.running < (this.profile?.().concurrency || this.concurrency) && ramOk()) this.#start(this.waiting.shift());
+      if (this.waiting.length) this.#retrySoon();
+    }, 10_000);
+    this.retryTimer.unref?.();
   }
 }
 
@@ -93,11 +114,11 @@ export const downloadQueue = new DownloadQueue({
  * Runs yt-dlp with an argument ARRAY (never through a shell), so user input
  * cannot be interpreted as shell commands.
  */
-export function runYtDlp(args, { cwd, timeoutMs = config.limits.maxDownloadSeconds * 1000, useCookies = true } = {}) {
+export function runYtDlp(args, { cwd, timeoutMs = config.limits.maxDownloadSeconds * 1000, useCookies = true, defaultClients = false } = {}) {
   return new Promise((resolve, reject) => {
-    const base = ['--no-warnings', '--no-playlist', '--no-config', '--ignore-config', '--no-cache-dir', '--js-runtimes', 'node'];
+    const base = ['--no-warnings', '--no-playlist', '--no-config', '--ignore-config', '--no-cache-dir', '--js-runtimes', 'node', '--retries', '3', '--fragment-retries', '3', '--socket-timeout', '25'];
     if (useCookies && config.tools.cookies) base.push('--cookies', config.tools.cookies);
-    base.push('--extractor-args', 'youtube:player_client=' + (process.env.YTDLP_CLIENTS || 'tv,android,ios,web_safari,mweb'));
+    if (!defaultClients) base.push('--extractor-args', 'youtube:player_client=' + (process.env.YTDLP_CLIENTS || 'tv,android,ios,web_safari,mweb'));
     const child = spawn(config.tools.ytdlp, [...base, ...args], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],

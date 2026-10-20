@@ -226,5 +226,12 @@
   "reminder_text_limit": "Еске салғыш мәтіні 1-1000 таңба болуы керек",
   "reminder_time_limit": "Еске салғыш келесі 90 күн ішінде болуы керек",
   "reminder_delivery": "Еске салу: {text}",
-  "speedtest_usage": "speedtest quick қолдан"
+  "speedtest_usage": "speedtest quick қолдан",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

@@ -226,5 +226,12 @@
   "reminder_text_limit": "提醒内容必须为1-1000个字符",
   "reminder_time_limit": "提醒必须在未来90天内",
   "reminder_delivery": "提醒：{text}",
-  "speedtest_usage": "使用speedtest quick"
+  "speedtest_usage": "使用speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

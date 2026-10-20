@@ -16,10 +16,8 @@ export async function sendMediaFile(sock, jid, file, quoted, caption = '',option
   } else if (file.type === 'image') {
     content = { image: source, caption };
   } else if (file.type === 'video') {
-    const size = file.size ?? 0;
-    content = size && size > config.limits.maxInlineVideoBytes
-      ? { document: source, mimetype: 'video/mp4', fileName: file.fileName || 'video.mp4', caption }
-      : { video: source, mimetype: 'video/mp4', caption };
+    if (file.conversion === 'video-transcode') caption = caption ? caption + '\n🗜️ Compressed to fit WhatsApp' : '🗜️ Compressed to fit WhatsApp';
+    content = { video: source, mimetype: 'video/mp4', caption };
   } else {
     content = { document: source, mimetype: file.mimetype || 'application/octet-stream', fileName: file.fileName || 'file', caption };
   }

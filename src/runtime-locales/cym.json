@@ -226,5 +226,12 @@
   "reminder_text_limit": "Rhaid i destun y nodyn atgoffa fod yn 1-1000 nod",
   "reminder_time_limit": "Rhaid i'r nodyn atgoffa fod o fewn y 90 diwrnod nesaf",
   "reminder_delivery": "Nodyn atgoffa: {text}",
-  "speedtest_usage": "Defnyddia speedtest quick"
+  "speedtest_usage": "Defnyddia speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

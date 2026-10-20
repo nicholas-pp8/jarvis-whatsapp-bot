@@ -226,5 +226,12 @@
   "reminder_text_limit": "Teksti i kujtesës duhet të ketë 1-1000 karaktere",
   "reminder_time_limit": "Kujtesa duhet të jetë brenda 90 ditëve të ardhshme",
   "reminder_delivery": "Kujtesë: {text}",
-  "speedtest_usage": "Përdor speedtest quick"
+  "speedtest_usage": "Përdor speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

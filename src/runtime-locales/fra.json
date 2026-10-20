@@ -226,5 +226,12 @@
   "reminder_text_limit": "Le texte du rappel doit faire de 1 à 1000 caractères",
   "reminder_time_limit": "Le rappel doit être dans les 90 prochains jours",
   "reminder_delivery": "Rappel : {text}",
-  "speedtest_usage": "Utilise speedtest quick"
+  "speedtest_usage": "Utilise speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

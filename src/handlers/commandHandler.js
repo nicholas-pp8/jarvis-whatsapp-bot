@@ -59,6 +59,15 @@ export async function loadCommands() {
       logger.error(`Failed to load command file ${f}:`, err);
     }
   }
+  try {
+    const { default: packs } = await import('../packs/index.js');
+    for (const c of packs) {
+      if (registry.get(c.name)) { logger.warn(`Pack command ${c.name} skipped: name already used`); continue; }
+      const bad = (c.aliases || []).filter((a) => registry.get(a));
+      if (bad.length) { logger.warn(`Pack command ${c.name}: aliases skipped (already used): ${bad.join(',')}`); c.aliases = c.aliases.filter((a) => !bad.includes(a)); }
+      registry.register(c);
+    }
+  } catch (err) { logger.error('Failed to load command packs:', err); }
   logger.info(`Loaded ${registry.list().length} commands`);
 }
 

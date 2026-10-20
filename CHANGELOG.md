@@ -1,3 +1,16 @@
+## 3.0.0 - "EKSAATH" (20 Oct 2026)
+
+37 features in one combined release (s61 stability pack + s62 feature drop):
+
+- **Stickers**: Telegram pack import (`/telesticker`, incl. video stickers), GIF search to sticker (`/stickersearch`, GIPHY), emoji mixer (`/emojimix`), per-chat auto-sticker (`/autosticker`).
+- **Downloads**: MEGA public files (`/mega`, clean-room client, streams to disk), MediaFire (`/mediafire`), GitHub repo zips (`/gitclone`, 30 MB cap).
+- **Group safety**: anti-edit (shows the original when someone edits), anti-sticker, anti-media, anti-promote (owner exempt), join-request review (`/joinreq`).
+- **Account tools (owner)**: `/privacy` (view/change last seen, online, profile pic, status, read receipts, group adds), auto-bio rotation (`/autobio`), anti-call (`/anticall`), status auto-react (`/statusreact`). All default OFF.
+- **Games**: UNO (hands by DM), Werewolf (roles by DM, night actions in DM), virtual pets (`/pet`), mini RPG (`/rpg`), group clans (`/clan`), rank cards with XP (`/rankcard`).
+- **Media & fun**: handwriting notes (`/handwrite`, bundled Kalam font), text logos (`/logo`, 6 styles), 33 fancy text styles (`/fancy`), menu image/video (`/setmenuimage`, `/setmenuvideo`).
+- **Info & tools**: football scores (`/football`, football-data.org), IP lookup (`/ip`), morse (`/morse`), contacts to VCF (`/vcf`), web inspect with SSRF guard (`/webinspect`), sandboxed code runner (`/runcode`, Piston), numerology (`/numerology`), color swatches (`/colorcode`), about lookup (`/getabout`), device guess (`/getdevice`), auto-react per chat (`/autoreact`), AFK (`/afk`).
+- **s61 stability pack**: encrypted session backup every 30 min, anti-logout watchdog, persistent logs, command catch-up queue, unlimited owner downloads (RAM-gated), `/webhook`.
+
 ## 2.1.0 (unreleased)
 
 - Hosted website pairing: after you link on the Jarvis site, your bot collects the prepared session once using your number and S-ID (`claimSession`). The server holds it sealed for 30 minutes at most. Opt out with `ecosystem.autoPair: false`. Disclosed in the README privacy section.

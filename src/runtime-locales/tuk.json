@@ -226,5 +226,12 @@
   "reminder_text_limit": "Ýatlatma teksti 1-1000 belgi bolmaly",
   "reminder_time_limit": "Ýatlatma indiki 90 günüň içinde bolmaly",
   "reminder_delivery": "Ýatlatma: {text}",
-  "speedtest_usage": "speedtest quick ulan"
+  "speedtest_usage": "speedtest quick ulan",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

@@ -6,6 +6,7 @@ import { startScheduler } from './scheduler.js';
 import { out } from './limiter.js';
 import { getMeta, dropMeta, num } from './perms.js';
 import config from '../config/config.js';
+import { featOn } from '../config/features.js';
 import { introText, botWasAdded } from './onboard.js';
 
 process.on('exit', (c) => console.log('[groups] process exit, code', c));
@@ -21,6 +22,21 @@ async function onParticipants(sock, ev) {
     const gid = ev.id;
     dropMeta(gid);
     const action = ev.action;
+    // ANTIPROMOTE: hand a promotion straight back unless the new admin is the owner.
+    if (action === 'promote' && featOn('antipromote') && settings(gid).antipromote) {
+      const owner = String(config.ownerNumber || '').replace(/\D/g, '');
+      const meta = await getMeta(sock, gid, true).catch(() => null);
+      const meAdmin = meta?.participants?.some((p) => p.id === sock.user?.id && p.admin);
+      if (meAdmin) {
+        for (const raw of ev.participants || []) {
+          const p = pid(raw);
+          if (!p || num(p) === owner) continue;
+          await out.schedule(() => sock.groupParticipantsUpdate(gid, [p], 'demote')).catch(() => {});
+          await out.schedule(() => sock.sendMessage(gid, { text: '🛡️ Anti-promote is on here - @' + num(p) + ' was demoted back.', mentions: [p] })).catch(() => {});
+        }
+      }
+      return;
+    }
     if (!['add', 'remove'].includes(action)) return;
     const s = settings(gid);
     if (action === 'add' && !s.onboarded) {

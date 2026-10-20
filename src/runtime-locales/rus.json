@@ -226,5 +226,12 @@
   "reminder_text_limit": "Текст напоминания должен быть от 1 до 1000 символов",
   "reminder_time_limit": "Напоминание должно быть в пределах ближайших 90 дней",
   "reminder_delivery": "Напоминание: {text}",
-  "speedtest_usage": "Используй speedtest quick"
+  "speedtest_usage": "Используй speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

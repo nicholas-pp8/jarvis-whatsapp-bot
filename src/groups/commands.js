@@ -216,6 +216,24 @@ add('resetwarn', {
   },
 });
 
+
+// JOINREQ: review and approve pending join requests (admins; bot must be admin).
+add('joinreq', {
+  aliases: ['joinrequests'], description: 'List or approve pending join requests (admins)', usage: 'joinreq list | joinreq approve-all', level: A, botAdmin: true,
+  async run(ctx) {
+    const sub = (ctx.args[0] || 'list').toLowerCase();
+    const list = await ctx.sock.groupRequestParticipantsList(ctx.jid).catch(() => []);
+    if (!list.length) return ctx.reply('No pending join requests.');
+    if (sub === 'approve-all') {
+      const ids = list.map((p) => p.jid || p.id || p).filter(Boolean);
+      await ctx.sock.groupRequestParticipantsUpdate(ctx.jid, ids, 'approve');
+      return ctx.reply(`✅ Approved ${ids.length} join request${ids.length === 1 ? '' : 's'}.`);
+    }
+    const lines = list.slice(0, 20).map((p, i) => `${i + 1}. @${num(p.jid || p.id || p)}`);
+    return ctx.sock.sendMessage(ctx.jid, { text: `*Pending join requests (${list.length}):*\n` + lines.join('\n') + '\n\nApprove everyone: ' + P() + 'joinreq approve-all', mentions: list.slice(0, 20).map((p) => p.jid || p.id || p) }, { quoted: ctx.msg });
+  },
+});
+
 function toggle(name, key, labelKey, extraKey = '') {
   add(name, {
     description: `Turn ${labelKey} on or off (admins)`, usage: `${name} on|off`, level: A,
@@ -225,14 +243,18 @@ function toggle(name, key, labelKey, extraKey = '') {
       if (!['on', 'off'].includes(v)) return ctx.reply(rt(ctx,'toggle_usage',{label,state:onoff(ctx,g.s[key]),prefix:P(),command:name}));
       g.st.setSetting(ctx.jid, key, v === 'on');
       let note = '';
-      if (v === 'on' && ['antilink', 'antispam', 'antiflood', 'badwords'].includes(key) && !isAdminP(g.me)) note = rt(ctx,'warn_no_delete');
+      if (v === 'on' && ['antilink', 'antispam', 'antiflood', 'badwords', 'antisticker', 'antimedia'].includes(key) && !isAdminP(g.me)) note = rt(ctx,'warn_no_delete');
       await ctx.reply(rt(ctx,'toggle_done',{label,state:onoff(ctx,v==='on'),note,extra:v==='on'?extra:''}));
     },
   });
 }
 toggle('antilink','antilink','label_antilink','antilink_note');
 toggle('antispam','antispam','label_antispam','antispam_note');
+toggle('antisticker','antisticker','label_antisticker');
+toggle('antipromote','antipromote','label_antipromote');
+toggle('antimedia','antimedia','label_antimedia');
 toggle('antiflood','antiflood','label_antiflood','antiflood_note');
+toggle('aitoxic','aitoxic','label_aitoxic');
 toggle('welcome','welcome','label_welcome');
 toggle('goodbye','goodbye','label_goodbye');
 

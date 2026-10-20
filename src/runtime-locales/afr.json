@@ -226,5 +226,12 @@
   "reminder_text_limit": "Herinneringteks moet 1-1000 karakters wees",
   "reminder_time_limit": "Herinnering moet binne die volgende 90 dae wees",
   "reminder_delivery": "Herinnering: {text}",
-  "speedtest_usage": "Gebruik speedtest quick"
+  "speedtest_usage": "Gebruik speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

@@ -226,5 +226,12 @@
   "reminder_text_limit": "రిమైండర్ టెక్స్ట్ 1-1000 అక్షరాలు ఉండాలి",
   "reminder_time_limit": "రిమైండర్ రాబోయే 90 రోజుల్లోపు ఉండాలి",
   "reminder_delivery": "రిమైండర్: {text}",
-  "speedtest_usage": "speedtest quick వాడు"
+  "speedtest_usage": "speedtest quick వాడు",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

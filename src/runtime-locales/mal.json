@@ -226,5 +226,12 @@
   "reminder_text_limit": "റിമൈൻഡർ ടെക്സ്റ്റ് 1-1000 അക്ഷരം ആയിരിക്കണം",
   "reminder_time_limit": "റിമൈൻഡർ അടുത്ത 90 ദിവസത്തിനുള്ളിൽ ആയിരിക്കണം",
   "reminder_delivery": "റിമൈൻഡർ: {text}",
-  "speedtest_usage": "speedtest quick ഉപയോഗിക്കൂ"
+  "speedtest_usage": "speedtest quick ഉപയോഗിക്കൂ",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

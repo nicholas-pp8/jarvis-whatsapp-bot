@@ -226,5 +226,12 @@
   "reminder_text_limit": "Isi pengingat harus 1-1000 karakter",
   "reminder_time_limit": "Pengingat harus dalam 90 hari ke depan",
   "reminder_delivery": "Pengingat: {text}",
-  "speedtest_usage": "Pakai speedtest quick"
+  "speedtest_usage": "Pakai speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

@@ -226,5 +226,12 @@
   "reminder_text_limit": "ਰਿਮਾਈਂਡਰ ਦੀ ਲਿਖਤ 1-1000 ਅੱਖਰਾਂ ਦੀ ਹੋਣੀ ਚਾਹੀਦੀ ਹੈ",
   "reminder_time_limit": "ਰਿਮਾਈਂਡਰ ਅਗਲੇ 90 ਦਿਨਾਂ ਦੇ ਅੰਦਰ ਹੋਣਾ ਚਾਹੀਦਾ ਹੈ",
   "reminder_delivery": "ਰਿਮਾਈਂਡਰ: {text}",
-  "speedtest_usage": "speedtest quick ਵਰਤੋ"
+  "speedtest_usage": "speedtest quick ਵਰਤੋ",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

@@ -226,5 +226,12 @@
   "reminder_text_limit": "Atgādinājuma tekstam jābūt 1-1000 rakstzīmju garam",
   "reminder_time_limit": "Atgādinājumam jābūt nākamo 90 dienu laikā",
   "reminder_delivery": "Atgādinājums: {text}",
-  "speedtest_usage": "Izmanto speedtest quick"
+  "speedtest_usage": "Izmanto speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

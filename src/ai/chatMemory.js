@@ -1,6 +1,6 @@
 // Short in-memory conversation context for /ask (per chat and sender). Not persisted.
-const TTL_MS = 30 * 60 * 1000;
-const MAX_TURNS = 6;
+const TTL_MS = 60 * 60 * 1000;
+const MAX_TURNS = 10;
 const mem = new Map();
 const key = (chat, user) => chat + '|' + user;
 export function recall(chat, user, now = Date.now()) {
@@ -10,7 +10,7 @@ export function recall(chat, user, now = Date.now()) {
 }
 export function remember(chat, user, q, a, now = Date.now()) {
   const k = key(chat, user);
-  const turns = [...recall(chat, user, now), { q: String(q).slice(0, 400), a: String(a).slice(0, 500) }].slice(-MAX_TURNS);
+  const turns = [...recall(chat, user, now), { q: String(q).slice(0, 600), a: String(a).slice(0, 900) }].slice(-MAX_TURNS);
   mem.set(k, { t: now, turns });
   if (mem.size > 2000) mem.delete(mem.keys().next().value);
 }

@@ -58,6 +58,12 @@ export async function cleanupStaleJobs(maxAgeMs = config.limits.tempMaxAgeMs) {
   try {
     const entries = await fs.readdir(config.paths.temp, { withFileTypes: true });
     for (const e of entries) {
+      if (e.isFile() || e.isSymbolicLink()) { // stray scratch files (upload/encrypt/convert temp)
+        const fp = path.join(config.paths.temp, e.name);
+        const fst = await fs.lstat(fp).catch(() => null);
+        if (fst && Date.now() - fst.mtimeMs > Math.max(maxAgeMs, 10 * 60 * 1000) ) { await fs.rm(fp, { force: true }).catch(() => {}); removed++; }
+        continue;
+      }
       if (!e.isDirectory() || !e.name.startsWith(JOB_PREFIX)) continue;
       const full = path.join(config.paths.temp, e.name);
       if(activeJobs.has(path.resolve(full)))continue;

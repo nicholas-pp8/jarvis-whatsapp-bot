@@ -226,5 +226,12 @@
   "reminder_text_limit": "リマインダーの内容は1-1000文字にしてね",
   "reminder_time_limit": "リマインダーはこれから90日以内にしてね",
   "reminder_delivery": "リマインダー: {text}",
-  "speedtest_usage": "speedtest quickを使ってね"
+  "speedtest_usage": "speedtest quickを使ってね",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

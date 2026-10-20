@@ -226,5 +226,12 @@
   "reminder_text_limit": "Il testo del promemoria deve avere da 1 a 1000 caratteri",
   "reminder_time_limit": "Il promemoria deve essere entro i prossimi 90 giorni",
   "reminder_delivery": "Promemoria: {text}",
-  "speedtest_usage": "Usa speedtest quick"
+  "speedtest_usage": "Usa speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

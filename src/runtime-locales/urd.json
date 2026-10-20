@@ -226,5 +226,12 @@
   "reminder_text_limit": "یاد دہانی کا متن 1-1000 حروف کا ہونا چاہیے",
   "reminder_time_limit": "یاد دہانی اگلے 90 دن کے اندر ہونی چاہیے",
   "reminder_delivery": "یاد دہانی: {text}",
-  "speedtest_usage": "speedtest quick استعمال کرو"
+  "speedtest_usage": "speedtest quick استعمال کرو",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

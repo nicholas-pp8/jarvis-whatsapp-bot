@@ -20,6 +20,22 @@ export const capsules=new Capsules(path.join(config.paths.data,'capsules.json'),
 import {recordConnection} from '../api/services/sessionService.js';
 import {Birthdays} from '../birthday/index.js';
 export const birthdays=new Birthdays(path.join(config.paths.data,'birthdays.json'),async(to,text,mentions)=>{if(!to||!online)return false;await socket.sendMessage(to,{text,mentions});return true;});
+import {Recurring} from '../utilities/recurring.js';
+import {buildSub,buildWatch} from '../subs/dispatch.js';
+const subSend=async(text,to)=>{if(!to||!online)return false;await socket.sendMessage(to,{text});return true;};
+export const subs=new Recurring(path.join(config.paths.data,'subs.json'),{build:buildSub,send:subSend});
+export const watches=new Recurring(path.join(config.paths.data,'watches.json'),{build:buildWatch,send:subSend});
+import {Habits} from '../subs/habitstore.js';
+export const habits=new Habits(path.join(config.paths.data,'habits.json'));
+import {Splits} from '../subs/splitstore.js';
+export const splits=new Splits(path.join(config.paths.data,'splits.json'));
+import {TinyJson} from '../subs/tinyjson.js';
+export const newsPrefs=new TinyJson(path.join(config.paths.data,'news-prefs.json'),{});
+export const notesPins=new TinyJson(path.join(config.paths.data,'notes-pins.json'),{});
+import {EconWeekly} from '../subs/econweekly.js';
+export const econWeekly=new EconWeekly(path.join(config.paths.data,'econ-weekly.json'));
+import {Memory} from '../memory/store.js';
+export const userMemory=new Memory(path.join(config.paths.data,'user-memory.json'));
 export function pairedNumber(){return String(socket?.user?.id||'').split('@')[0].split(':')[0];}
 export function recordError(){health.error();}
 export function connection(sock,up){socket=sock;online=up;try{recordConnection(up);}catch{}globalThis.__jarvisWA=up?'online':'offline';clearTimeout(healthTimer);if(up){healthTimer=setTimeout(()=>{if(online)healthy(config.paths.data).catch(()=>{});},30000);healthTimer.unref();}}
@@ -51,5 +67,5 @@ export async function tick(){if(running)return;running=true;try{
  const weekday=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',weekday:'long'}).format(new Date());
  if(online&&weekday==='Sunday'&&hour>=Math.min(23,Math.max(0,Number(process.env.OPS_REPORT_HOUR??10)))&&state.weekly!==today&&await notify(report(rt(ownerContext(),'title_weekly'),7))){state.weekly=today;save();}
  }finally{running=false;}}
-export function start(){if(started)return;started=true;reminderTask=cron.schedule('* * * * *',()=>{reminders.tick().catch(()=>{});scheduled.tick().catch(()=>{});capsules.tick().catch(()=>{});birthdays.tick().catch(()=>{});},{timezone:'Asia/Kolkata'});timer=setInterval(()=>tick().catch(()=>{}),60000);timer.unref?.();}
+export function start(){if(started)return;started=true;reminderTask=cron.schedule('* * * * *',()=>{reminders.tick().catch(()=>{});scheduled.tick().catch(()=>{});capsules.tick().catch(()=>{});birthdays.tick().catch(()=>{});subs.tick().catch(()=>{});watches.tick().catch(()=>{});try{econWeekly.tick();}catch{}},{timezone:'Asia/Kolkata'});timer=setInterval(()=>tick().catch(()=>{}),60000);timer.unref?.();}
 export function stop(){reminderTask?.stop();reminderTask?.destroy();clearInterval(timer);clearTimeout(healthTimer);started=false;usage.flush();}

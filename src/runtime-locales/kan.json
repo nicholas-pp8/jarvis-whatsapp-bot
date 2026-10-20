@@ -226,5 +226,12 @@
   "reminder_text_limit": "ರಿಮೈಂಡರ್ ಪಠ್ಯ 1-1000 ಅಕ್ಷರ ಇರಬೇಕು",
   "reminder_time_limit": "ರಿಮೈಂಡರ್ ಮುಂದಿನ 90 ದಿನಗಳೊಳಗೆ ಇರಬೇಕು",
   "reminder_delivery": "ರಿಮೈಂಡರ್: {text}",
-  "speedtest_usage": "speedtest quick ಬಳಸು"
+  "speedtest_usage": "speedtest quick ಬಳಸು",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

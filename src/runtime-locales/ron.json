@@ -226,5 +226,12 @@
   "reminder_text_limit": "Textul mementoului trebuie să aibă 1-1000 de caractere",
   "reminder_time_limit": "Mementoul trebuie să fie în următoarele 90 de zile",
   "reminder_delivery": "Memento: {text}",
-  "speedtest_usage": "Folosește speedtest quick"
+  "speedtest_usage": "Folosește speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

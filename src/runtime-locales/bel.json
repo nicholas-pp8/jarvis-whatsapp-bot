@@ -226,5 +226,12 @@
   "reminder_text_limit": "Тэкст напаміну мусіць быць ад 1 да 1000 сімвалаў",
   "reminder_time_limit": "Напамін мусіць быць у бліжэйшыя 90 дзён",
   "reminder_delivery": "Напамін: {text}",
-  "speedtest_usage": "Выкарыстай speedtest quick"
+  "speedtest_usage": "Выкарыстай speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

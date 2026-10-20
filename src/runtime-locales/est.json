@@ -226,5 +226,12 @@
   "reminder_text_limit": "Meeldetuletuse tekst peab olema 1-1000 tähemärki",
   "reminder_time_limit": "Meeldetuletus peab olema järgmise 90 päeva sees",
   "reminder_delivery": "Meeldetuletus: {text}",
-  "speedtest_usage": "Kasuta speedtest quick"
+  "speedtest_usage": "Kasuta speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

@@ -226,5 +226,12 @@
   "reminder_text_limit": "Az emlékeztető szövege 1-1000 karakter lehet",
   "reminder_time_limit": "Az emlékeztetőnek a következő 90 napon belülre kell esnie",
   "reminder_delivery": "Emlékeztető: {text}",
-  "speedtest_usage": "Használd: speedtest quick"
+  "speedtest_usage": "Használd: speedtest quick",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

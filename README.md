@@ -5,14 +5,14 @@
 <img src="assets/logo.png" width="150" alt="Jarvis logo" />
 
 <a href="https://jarvis-wa-bot.netlify.app">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=24&pause=1100&color=3DDCFF&center=true&vCenter=true&width=700&lines=%F0%9F%A4%96+217%2B+commands+in+one+chat;%F0%9F%A7%A0+AI+answers+with+%2Fask;%F0%9F%8E%B5+Music+and+video+downloads;%F0%9F%8E%A8+Stickers+and+image+tools;%F0%9F%8E%AE+Games%2C+XP+and+a+virtual+economy;%F0%9F%9B%A1%EF%B8%8F+Full+group+management;%F0%9F%93%8A+Live+owner+dashboard" alt="Typing animation" />
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=24&pause=1100&color=3DDCFF&center=true&vCenter=true&width=700&lines=%F0%9F%A4%96+2000%2B+commands+in+one+chat;%F0%9F%A7%A0+AI+answers+with+%2Fask;%F0%9F%8E%B5+Music+and+video+downloads;%F0%9F%8E%A8+Stickers+and+image+tools;%F0%9F%8E%AE+Games%2C+XP+and+a+virtual+economy;%F0%9F%9B%A1%EF%B8%8F+Full+group+management;%F0%9F%93%8A+Live+owner+dashboard" alt="Typing animation" />
 </a>
 
 <p>
   <a href="https://jarvis-wa-bot.netlify.app"><img src="https://img.shields.io/badge/%F0%9F%8C%90_Live_website-open-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Website" /></a>
   <img src="https://img.shields.io/badge/Node.js-20%2B-3DDCFF?style=for-the-badge&logo=node.js&logoColor=white&labelColor=0b1c2c" alt="Node" />
   <img src="https://img.shields.io/badge/Baileys-7.0-3DDCFF?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=0b1c2c" alt="Baileys" />
-  <img src="https://img.shields.io/badge/commands-217%2B-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
+  <img src="https://img.shields.io/badge/commands-2000%2B-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="Commands" />
   <img src="https://img.shields.io/badge/price-free-22c55e?style=for-the-badge&labelColor=0b1c2c" alt="Free" />
   <img src="https://img.shields.io/badge/license-MIT-3DDCFF?style=for-the-badge&labelColor=0b1c2c" alt="License" />
 </p>
@@ -42,7 +42,7 @@
 
 <div align="center">
 
-| 🤖 **217+** | 🗂️ **17** | 💸 **Free** | ⚡ **~150 MB** |
+| 🤖 **2000+** | 🗂️ **30+** | 💸 **Free** | ⚡ **~150 MB** |
 |:--:|:--:|:--:|:--:|
 | commands | categories | no paid plan | typical RAM |
 

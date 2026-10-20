@@ -226,5 +226,12 @@
   "reminder_text_limit": "알림 내용은 1-1000자여야 해",
   "reminder_time_limit": "알림은 앞으로 90일 이내여야 해",
   "reminder_delivery": "알림: {text}",
-  "speedtest_usage": "speedtest quick을 써 줘"
+  "speedtest_usage": "speedtest quick을 써 줘",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }

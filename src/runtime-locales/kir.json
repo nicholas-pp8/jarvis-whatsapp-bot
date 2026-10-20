@@ -226,5 +226,12 @@
   "reminder_text_limit": "Эскертменин тексти 1-1000 белги болушу керек",
   "reminder_time_limit": "Эскертме кийинки 90 күндүн ичинде болушу керек",
   "reminder_delivery": "Эскертме: {text}",
-  "speedtest_usage": "speedtest quick колдон"
+  "speedtest_usage": "speedtest quick колдон",
+  "label_aitoxic": "AI abuse filter",
+  "moderation_toxic": "that message looks abusive or hateful",
+  "label_antisticker": "Anti-sticker",
+  "label_antimedia": "Anti-media",
+  "label_antipromote": "Anti-promote",
+  "moderation_media": "sending media",
+  "moderation_sticker": "sending stickers"
 }
