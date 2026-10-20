@@ -35,7 +35,7 @@ export function isVerifiedOwnerDM(ctx) {
   } catch { return false; }
 }
 
-const DESTRUCTIVE = /(^|\s|&&|\|\||;)(rm|rmdir|mv|dd|shred|kill|pkill|killall|truncate)(\s|$)|>\s*[^&]|chmod\s+-R|chown\s+-R|npm\s+(uninstall|remove)|git\s+(push|reset\s+--hard|clean)|:\s*\(\s*\)\s*\{|\bmkfs\b|\breboot\b|\bshutdown\b|\/api\/client\/servers\/[^\s"']+\/power\b/i;
+const DESTRUCTIVE = /(^|\s|&&|\|\||;)(rm|rmdir|mv|dd|shred|kill|pkill|killall|truncate)(\s|$)|>\s*[^&]|chmod\s+-R|chown\s+-R|npm\s+(uninstall|remove|install|update|i)\b|git\s+(push|reset\s+--hard|clean)|:\s*\(\s*\)\s*\{|\bmkfs\b|\breboot\b|\bshutdown\b|\/api\/client\/servers\/[^\s"']+\/power\b/i;
 const SECRET_READ = /(^|\s)(cat|less|more|head|tail|strings|xxd|base64|cp|tar|grep|awk|sed|source|\.)\s+[^|;]*(\.env\b|\bauth[\/\s]|auth-backup|\.ssh|id_rsa|id_ed25519)|^\s*(env|printenv|export\s+-p)\s*($|;|\|)/i;
 const REFUSE = /(wifite|aircrack|metasploit|hydra|nmap\s+.*-p|sqlmap|ddos|\bflood|\bspam)/i;
 

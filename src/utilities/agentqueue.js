@@ -50,6 +50,21 @@ export function enqueue(jid, items, goal) {
   return q;
 }
 
+// Owner cancel: mark every pending item cancelled and close the queue. The file
+// currently downloading finishes (fetches cannot be aborted mid-flight), then the
+// processor sees no pending items, posts the cancelled summary and stops.
+export function cancelQueue() {
+  const q = liveQueue || load();
+  if (!q || q.finishedAt || !Array.isArray(q.items)) return { cancelled: 0, active: false };
+  const remaining = q.items.filter((i) => i.status === 'pending');
+  for (const i of remaining) i.status = 'cancelled';
+  q.finishedAt = Date.now();
+  save(q);
+  if (liveQueue) liveQueue = q;
+  audit('QUEUE CANCELLED ' + remaining.length + ' pending item(s) via /' + (q.items[0]?.cmd || '?'));
+  return { cancelled: remaining.length, active: processing };
+}
+
 export function retryFailed() {
   const f = failedItems();
   if (!f.length) return 0;
@@ -159,7 +174,10 @@ async function processQueue() {
     q.finishedAt = Date.now(); save(q);
     const total = q.items.length;
     const failedNames = q.items.filter((i) => i.status === 'failed').map((i) => i.args);
-    const summary = '📦 Bulk delivery finished: ' + (q.done || 0) + ' of ' + total + ' delivered' + (q.bytes ? ' (' + formatBytes(q.bytes) + ' total)' : '') + '.' +
+    const cancelledCount = q.items.filter((i) => i.status === 'cancelled').length;
+    const summary = (cancelledCount
+      ? '🛑 Bulk delivery stopped by you: ' + (q.done || 0) + ' delivered' + (q.bytes ? ' (' + formatBytes(q.bytes) + ')' : '') + ', ' + cancelledCount + ' cancelled.'
+      : '📦 Bulk delivery finished: ' + (q.done || 0) + ' of ' + total + ' delivered' + (q.bytes ? ' (' + formatBytes(q.bytes) + ' total)' : '') + '.') +
       (failedNames.length ? '\nCould not get ' + failedNames.length + ': ' + failedNames.join(', ').slice(0, 400) + '\nSay "/agent retry" and I will try the failed ones again.' : '');
     try { await prog.text(summary); } catch { await ctx.reply(summary); }
     audit('QUEUE DONE ' + (q.done || 0) + '/' + total + ' failed=' + (q.failed || 0));

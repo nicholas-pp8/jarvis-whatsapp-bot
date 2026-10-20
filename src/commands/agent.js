@@ -153,6 +153,77 @@ function fmtMB(bytes) {
   return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB';
 }
 
+// ---- Deterministic junk cleanup ------------------------------------------
+// "clean up junk" goals never reach the LLM planner: scan known junk spots,
+// show an itemized list with sizes, delete only after YES, report MB freed.
+const JUNK_DENY = /(^|\/)(auth|auth-backup|sessions?|creds|\.env|node_modules\/(?!\.cache)|package(-lock)?\.json|config\.|agent-queue\.json|agent-session\.json)/i;
+function isCancelDownloadGoal(goal) {
+  return /\b(cancel|stop|band|ruk jao|roko)\b/i.test(goal) && /\b(download|queue|pinterest|videos?|songs?|photos?|memes?|bulk|files?|sab|bhejna)\b/i.test(goal);
+}
+function isJunkCleanupGoal(goal) {
+  if (/\b(check|batao|dikhao|kitna|status|how much|show)\b/i.test(goal)) return false;
+  return /\b(clean ?up|cleanup|junk|saaf|hatao|free up|clear (?:the )?(?:cache|tmp|temp|logs))\b/i.test(goal);
+}
+function scanJunk() {
+  const DAY = 864e5, now = Date.now();
+  const junk = [];
+  const seen = new Set();
+  const push = (p, bytes, why) => {
+    const rp = path.resolve(p);
+    if (seen.has(rp) || JUNK_DENY.test(p)) return;
+    seen.add(rp);
+    junk.push({ path: p, bytes, why });
+  };
+  const walk = (dir, why, maxAgeMs, depth) => {
+    if (depth > 4) return;
+    let ents;
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const p = path.join(dir, e.name);
+      if (JUNK_DENY.test(p)) continue;
+      try {
+        if (e.isDirectory()) walk(p, why, maxAgeMs, depth + 1);
+        else if (e.isFile()) {
+          const st = fs.statSync(p);
+          if (now - st.mtimeMs > maxAgeMs) push(p, st.size, why);
+        }
+      } catch { /* skip */ }
+    }
+  };
+  // old logs: keep the 2 newest
+  try {
+    const logs = fs.readdirSync('data/logs').filter((f) => f.endsWith('.log'))
+      .map((f) => ({ f, m: fs.statSync(path.join('data/logs', f)).mtimeMs })).sort((a, b) => b.m - a.m);
+    for (const l of logs.slice(2)) { const p = path.join('data/logs', l.f); push(p, fs.statSync(p).size, 'old log'); }
+  } catch { /* none */ }
+  // rollback/ops archives: keep the 2 newest of each family
+  for (const [dir, re, why] of [['.', /^archive-.*\.tar\.gz$/i, 'old rollback archive'], ['data', /^ops-backup-.*\.tar\.gz$/i, 'old auto backup'], ['data', /^agent-session-.*\.bak$/i, 'old session backup']]) {
+    try {
+      const arcs = fs.readdirSync(dir).filter((f) => re.test(f))
+        .map((f) => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.m - a.m);
+      for (const a of arcs.slice(2)) { const p = dir === '.' ? a.f : path.join(dir, a.f); push(p, fs.statSync(p).size, why); }
+    } catch { /* none */ }
+  }
+  // caches: any age; tmp/download staging: older than a day
+  for (const d of ['node_modules/.cache', '.cache']) walk(d, 'cache', 0, 0);
+  for (const d of ['tmp', 'data/tmp', 'downloads', 'data/downloads', 'data/media', 'data/staging']) walk(d, 'leftover temp file', DAY, 0);
+  return junk;
+}
+async function runJunkCleanup(ctx) {
+  await ctx.reply('Scanning for junk (old logs, old archives, caches, temp files)...');
+  const junk = scanJunk();
+  if (!junk.length) return ctx.reply('No junk found - logs, archives, caches and temp folders are already clean.');
+  const total = junk.reduce((s, j) => s + j.bytes, 0);
+  const fmt = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  const lines = junk.slice(0, 15).map((j) => '- ' + j.path + ' (' + fmt(j.bytes) + ') - ' + j.why);
+  if (junk.length > 15) lines.push('- ...and ' + (junk.length - 15) + ' more');
+  const cmds = junk.map((j) => 'rm -rf -- ' + JSON.stringify(j.path));
+  shell.stage(cmds, { restarts: 0, note: 'Expected to free about ' + fmt(total) + '.' });
+  shell.audit('JUNK SCAN found ' + junk.length + ' item(s), ' + total + ' bytes');
+  return ctx.reply('Found ' + junk.length + ' junk item(s), about ' + fmt(total) + ' total:\n' + lines.join('\n') +
+    '\n\nNothing is deleted yet. Reply YES within 5 minutes to delete all of these, or NO to cancel. A backup is taken automatically first.');
+}
+
 // Shared YES/NO handler used by the /agent command and the plain-text YES/NO hook.
 // Returns true when the message was a pending-confirmation answer (handled).
 export async function handlePendingAnswer(ctx, isYes) {
@@ -171,7 +242,8 @@ export async function handlePendingAnswer(ctx, isYes) {
   lastRaw = { ts: Date.now(), text: results.map((r) => '$ ' + r.cmd + ' (exit ' + r.code + ')\n' + r.out).join('\n---\n') };
   const failed = results.filter((r) => r.code !== 0).length;
   const rawForAi = results.map((r) => r.cmd + ' -> exit ' + r.code + (r.out ? '\n' + r.out : '')).join('\n');
-  const text = (results.length ? ((await summarize(rawForAi, 'Say clearly what was deleted or changed and whether it all worked.')) || fallbackSummary(results)) : 'Nothing to run.');
+  let text = (results.length ? ((await summarize(rawForAi, 'Say clearly what was deleted or changed and whether it all worked.')) || fallbackSummary(results)) : 'Nothing to run.');
+  if (p.note) text += '\n' + p.note;
   await ctx.reply(
     (backup ? 'Backup saved: ' + backup + '\n' : '') +
     (failed ? '⚠️ ' : '') + text +
@@ -606,6 +678,7 @@ async function runShellModeBody(ctx, goal, tid) {
   }
   const rawForAi = results.map((r) => r.cmd + ' -> exit ' + r.code + (r.out ? '\n' + r.out : '')).join('\n');
   const bulkOnly = results.length > 0 && results.every((r) => r.code === 0 && /^bulk \//.test(r.cmd));
+  if (stagedShells.length && !finalNote) finalNote = '';
   let text = finalNote || (bulkOnly ? results.map((r) => r.out).join('\n')
     : (results.length ? ((await summarize(rawForAi)) || fallbackSummary(results)) : 'Nothing to run for that.'));
 
@@ -697,7 +770,16 @@ export default {
       if (/^(schedules|list schedules)$/i.test(goal)) return runListSchedules(ctx);
     }
     if (!ctx.isOwner && !allow(ctx.sender, 3)) return ctx.reply('Agent mode is taking a breather. Try again in a little while.');
-    if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) return runShellMode(ctx, goal);
+    if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) {
+      if (isJunkCleanupGoal(goal)) return runJunkCleanup(ctx);
+      if (isCancelDownloadGoal(goal)) {
+        const r = agentqueue.cancelQueue();
+        if (!r.cancelled && !r.active) return ctx.reply('No download queue is running right now.');
+        return ctx.reply('🛑 Cancelled the download queue: ' + r.cancelled + ' pending item(s) cancelled.' +
+          (r.active ? ' The file downloading right now will finish, then everything stops.' : ''));
+      }
+      return runShellMode(ctx, goal);
+    }
     return runSafeMode(ctx, goal);
   },
 };
