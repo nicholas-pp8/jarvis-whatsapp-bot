@@ -11,6 +11,14 @@ import crypto from 'node:crypto';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 
+// Owner-action audit trail: every shell command, send, staged action lands here (unmasked, owner-only file).
+export function audit(line) {
+  try {
+    fs.mkdirSync('data', { recursive: true });
+    fs.appendFileSync(path.join('data', 'agent-audit.log'), new Date().toISOString() + ' ' + String(line).replace(/[\r\n]+/g, ' ').slice(0, 500) + '\n');
+  } catch { /* best effort */ }
+}
+
 const num = (j) => String(j || '').split('@')[0].split(':')[0].replace(/\D/g, '');
 
 export function isVerifiedOwnerDM(ctx) {
@@ -27,7 +35,7 @@ export function isVerifiedOwnerDM(ctx) {
   } catch { return false; }
 }
 
-const DESTRUCTIVE = /(^|\s|&&|\|\||;)(rm|rmdir|mv|dd|shred|kill|pkill|killall|truncate)(\s|$)|>\s*[^&]|chmod\s+-R|chown\s+-R|npm\s+(uninstall|remove)|git\s+(push|reset\s+--hard|clean)|:\s*\(\s*\)\s*\{|\bmkfs\b|\breboot\b|\bshutdown\b/i;
+const DESTRUCTIVE = /(^|\s|&&|\|\||;)(rm|rmdir|mv|dd|shred|kill|pkill|killall|truncate)(\s|$)|>\s*[^&]|chmod\s+-R|chown\s+-R|npm\s+(uninstall|remove)|git\s+(push|reset\s+--hard|clean)|:\s*\(\s*\)\s*\{|\bmkfs\b|\breboot\b|\bshutdown\b|\/api\/client\/servers\/[^\s"']+\/power\b/i;
 const SECRET_READ = /(^|\s)(cat|less|more|head|tail|strings|xxd|base64|cp|tar|grep|awk|sed|source|\.)\s+[^|;]*(\.env\b|\bauth[\/\s]|auth-backup|\.ssh|id_rsa|id_ed25519)|^\s*(env|printenv|export\s+-p)\s*($|;|\|)/i;
 const REFUSE = /(wifite|aircrack|metasploit|hydra|nmap\s+.*-p|sqlmap|ddos|\bflood|\bspam)/i;
 
@@ -57,8 +65,8 @@ export function execShell(cmd, { timeoutMs = 60000 } = {}) {
 
 // Staging + confirmation
 let pending = null; // {id, cmds, createdAt}
-export function stage(cmds) {
-  pending = { id: crypto.randomBytes(3).toString('hex'), cmds, createdAt: Date.now() };
+export function stage(cmds, extra = {}) {
+  pending = { id: crypto.randomBytes(3).toString('hex'), cmds, restarts: extra.restarts || 0, createdAt: Date.now() };
   return pending;
 }
 export const getPending = () => (pending && Date.now() - pending.createdAt < 5 * 60e3 ? pending : null);
@@ -80,6 +88,25 @@ export async function backupTargets(cmds) {
     if (code !== 0) return null;
     return rel;
   } catch { return null; }
+}
+
+
+// Count and size the existing files a destructive command set would touch (for plain-language confirms).
+export function describeTargets(cmds) {
+  const targets = new Set();
+  for (const c of cmds) {
+    for (const m of c.matchAll(/(?:rm|mv|cp|truncate|shred)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|]+)/gi)) targets.add(m[1]);
+    for (const m of c.matchAll(/>\s*([^\s;&|]+)/g)) targets.add(m[1]);
+  }
+  let count = 0, bytes = 0;
+  for (const t of targets) {
+    try {
+      const st = fs.lstatSync(path.resolve(t));
+      count++;
+      if (!st.isDirectory()) bytes += st.size;
+    } catch { /* gone already */ }
+  }
+  return { count, bytes, targets: [...targets] };
 }
 
 export async function runStaged(p) {

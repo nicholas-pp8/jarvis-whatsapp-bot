@@ -9,6 +9,19 @@ const fmtEta = (s) => {
 };
 
 export function renderProgress({ name, received, total, speed, kind, done }) {
+  if (kind === 'task') {
+    const pctT = total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null;
+    const filledT = pctT === null ? 0 : Math.round(pctT / 5);
+    const barT = pctT === null ? '[░░░░░░░░░░░░░░░░░░░░]' : `[${'█'.repeat(filledT)}${'░'.repeat(20 - filledT)}] ${pctT}%`;
+    const etaT = done ? '0s' : total > 0 && speed > 0 ? fmtEta((total - received) / speed) : 'calculating...';
+    return [
+      done ? '✅ Done' : '🤖 Working on it',
+      `🪜 ${String(name || 'Planning...').slice(0, 80)}`,
+      barT,
+      `🔢 Steps: ${received}${total > 0 ? ` / ~${total}` : ''}`,
+      `⏱️ ETA: ${etaT}`,
+    ].join('\n');
+  }
   const icon = kind === 'audio' ? '🎵' : '🎬';
   const pct = total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null;
   const filled = pct === null ? 0 : Math.round(pct / 5);

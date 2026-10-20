@@ -244,6 +244,7 @@ export async function startWhatsApp() {
       if (connectionState === 'connecting') logger.info('Connecting to WhatsApp…');
 
       if (connectionState === 'open') {
+        try { const { setSock } = await import('../utilities/ownersock.js'); setSock(s); } catch {}
         try { await bindPairedOwner(s,state.creds.me,config); } catch { config.ownerNumber=''; logger.error('Paired owner identity/save failed. Stopping; check auth storage and connected identity.');return shutdown(1); }
         connection(s,true);
         heartbeat?.setConnected(true);

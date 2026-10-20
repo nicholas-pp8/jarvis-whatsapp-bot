@@ -3,17 +3,38 @@
 //   get a clear answer, never generic shell dumps.
 // - Verified owner DM (shell mode, flag 'ownershell'): full-access shell planner.
 //   Safe commands run right away; destructive ones are staged and need a literal
-//   one-word YES within 5 min (auto backup first). Secrets are never printed and
-//   attacks/privacy violations are refused.
+//   one-word YES (or "/agent yes") within 5 min, with an automatic backup first.
+//   Secrets are never printed; attacks/privacy violations are refused.
+//   Owner replies are short plain English summaries - raw command output is only
+//   shown when the owner asks for it ("raw").
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { featOn } from '../config/features.js';
 import { askAi } from '../ai/providers.js';
 import { registry } from '../handlers/commandHandler.js';
 import * as shell from '../utilities/ownershell.js';
+import { suggest } from '../utils/suggest.js';
+import { createProgressMessage } from '../utils/progressBar.js';
+import { getSock } from '../utilities/ownersock.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import cron from 'node-cron';
 
 const SAFE = ['weather', 'news', 'ask', 'define', 'translate', 'wiki', 'time', 'stock', 'quote', 'lyrics'];
 const MAX_STEPS = 5, MAX_GOAL = 300, MAX_ARG = 120, SH_STEPS = 6;
+
+// Commands Jarvis must never auto-run from a planner plan (group/admin/dangerous).
+const CMD_BLOCK = new Set(['add', 'kick', 'promote', 'demote', 'ban', 'unban', 'mute', 'unmute', 'broadcast', 'leave', 'block', 'unblock', 'approve', 'reject', 'delete', 'del', 'update', 'restart', 'shutdown', 'setprefix', 'broadcastall']);
+function resolveCmd(name) {
+  const direct = registry.get(name);
+  if (direct) return { cmd: direct, name };
+  const near = suggest(name, registry.list(), 1);
+  if (near && near.length) {
+    const c = registry.get(near[0]);
+    if (c) return { cmd: c, name: near[0] };
+  }
+  return null;
+}
 
 const hits = new Map(); // user -> [timestamps]
 function allow(user, perHour, now = Date.now()) {
@@ -54,57 +75,420 @@ function parseShellPlan(raw) {
     const steps = [];
     for (const s of arr.slice(0, SH_STEPS)) {
       if (s?.refuse) return { refuse: String(s.refuse).slice(0, 300) };
+      if (s?.done) return { done: String(s.done).slice(0, 300) };
+      if (s?.ask) return { ask: String(s.ask).slice(0, 300) };
+      if (s?.schedule) {
+        const c = String(s.schedule.cron || '').trim();
+        const g = String(s.schedule.goal || '').trim().slice(0, 200);
+        if (!/^([\d*/,-]+\s+){4}[\d*/,-]+$/.test(c) || !g) return null;
+        steps.push({ type: 'schedule', cron: c, goal: g });
+        continue;
+      }
+      if (s?.restart === true) { steps.push({ type: 'restart' }); continue; }
+      if (s?.send) {
+        const to = String(s.send.to || '').replace(/\D/g, '');
+        const text = String(s.send.text || '').replace(/[\r\n]{3,}/g, '\n\n').slice(0, 1000).trim();
+        if (to.length < 8 || to.length > 15 || !text) return null;
+        steps.push({ type: 'send', to, text });
+        continue;
+      }
+      if (s?.cmd) {
+        const cmd = String(s.cmd).toLowerCase().replace(/[^a-z0-9]/g, '');
+        const args = String(s.args || '').slice(0, 200).replace(/[\r\n]/g, ' ').trim();
+        if (!cmd) return null;
+        steps.push({ type: 'cmd', cmd, args });
+        continue;
+      }
       const sh = String(s?.sh || '').trim();
       if (!sh || sh.length > 300 || /\r|\n/.test(sh)) return null;
-      steps.push(sh);
+      steps.push({ type: 'sh', sh });
     }
     return steps.length ? { steps } : null;
   } catch { return null; }
 }
+
+// Turn raw shell output into a short plain-English summary for the owner.
+async function summarize(raw, extraInstruction = '') {
+  try {
+    const r = await askAi(
+      'You are Jarvis. This is the result of work you just did on your own server:\n\n' + String(raw).slice(0, 2500) +
+      '\n\nSummarize it for the owner in 2-4 short plain English sentences with the key numbers and names. ' +
+      'Do not write any commands or code. Be direct and factual.' + (extraInstruction ? ' ' + extraInstruction : ''),
+      { allowKeyless: true, temperature: 0.2 });
+    const t = String(r?.text || r || '').trim();
+    if (t && t.length > 10) return t.slice(0, 1200);
+  } catch (e) { logger.warn('[agent] summarizer failed: ' + (e?.message || 'error')); }
+  return null; // caller falls back
+}
+
+function fallbackSummary(results) {
+  const ok = results.filter((r) => r.code === 0).length;
+  const failed = results.length - ok;
+  let t = ok + ' action(s) completed' + (failed ? ', ' + failed + ' failed' : '') + '.';
+  if (failed) {
+    const first = results.find((r) => r.code !== 0);
+    t += ' First error: ' + (first.out || 'exit ' + first.code).split('\n').filter(Boolean).slice(-1)[0].slice(0, 200);
+  }
+  return t;
+}
+
+// Raw output shown only on request, fresh for 10 minutes after a run.
+let lastRaw = null; // {ts, text}
 
 async function editOrReply(ctx, live, text) {
   if (live?.key) { try { return void await ctx.sock.sendMessage(ctx.jid, { text, edit: live.key }); } catch {} }
   return ctx.reply(text);
 }
 
-async function runShellMode(ctx, goal) {
-  const live = await ctx.reply('🤖 Working on it...').catch(() => null);
-  let plan = null;
+function fmtMB(bytes) {
+  return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+}
+
+// Shared YES/NO handler used by the /agent command and the plain-text YES/NO hook.
+// Returns true when the message was a pending-confirmation answer (handled).
+export async function handlePendingAnswer(ctx, isYes) {
+  const p = shell.getPending();
+  if (!p) return false;
+  if (!shell.isVerifiedOwnerDM(ctx)) return false;
+  if (!isYes) {
+    shell.clearPending();
+    shell.audit('CANCELLED staged actions');
+    await ctx.reply('Cancelled. Nothing was changed.');
+    return true;
+  }
+  shell.clearPending();
+  await ctx.reply('Confirmed - taking a backup first, then running ' + (p.cmds.length + (p.restarts || 0)) + ' action(s)...');
+  const { backup, results } = await shell.runStaged(p);
+  lastRaw = { ts: Date.now(), text: results.map((r) => '$ ' + r.cmd + ' (exit ' + r.code + ')\n' + r.out).join('\n---\n') };
+  const failed = results.filter((r) => r.code !== 0).length;
+  const rawForAi = results.map((r) => r.cmd + ' -> exit ' + r.code + (r.out ? '\n' + r.out : '')).join('\n');
+  const text = (results.length ? ((await summarize(rawForAi, 'Say clearly what was deleted or changed and whether it all worked.')) || fallbackSummary(results)) : 'Nothing to run.');
+  await ctx.reply(
+    (backup ? 'Backup saved: ' + backup + '\n' : '') +
+    (failed ? '⚠️ ' : '') + text +
+    '\n(Reply "/agent raw" within 10 min to see the exact output.)');
+  if (p.restarts > 0) {
+    await ctx.reply('Restarting Jarvis now - back in about a minute.');
+    try {
+      const { shutdown } = await import('../connection/whatsapp.js');
+      setTimeout(() => shutdown(0), 3000);
+    } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
+  }
+  return true;
+}
+
+// ---- Conversation memory (30 min) ---------------------------------------
+const SESSION_FILE = path.join('data', 'agent-session.json');
+function loadSession() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+    if (Date.now() - s.ts < 30 * 60e3) return s;
+  } catch { /* none */ }
+  return null;
+}
+function saveSession(goal, summary) {
+  try {
+    fs.mkdirSync('data', { recursive: true });
+    fs.writeFileSync(SESSION_FILE, JSON.stringify({ goal: String(goal).slice(0, 300), summary: String(summary).slice(0, 500), ts: Date.now() }));
+  } catch { /* best effort */ }
+}
+
+// ---- Scheduled tasks ------------------------------------------------------
+const SCHED_FILE = path.join('data', 'agent-schedules.json');
+const schedJobs = new Map(); // id -> cron task
+function loadSchedules() {
+  try { return JSON.parse(fs.readFileSync(SCHED_FILE, 'utf8')); } catch { return []; }
+}
+function saveSchedules(list) {
+  try { fs.mkdirSync('data', { recursive: true }); fs.writeFileSync(SCHED_FILE, JSON.stringify(list, null, 1)); } catch { /* best effort */ }
+}
+function ownerDM() {
+  return String(config.ownerNumber).replace(/\D/g, '') + '@s.whatsapp.net';
+}
+function scheduleOne(entry) {
+  if (!cron.validate(entry.cron)) return false;
+  const task = cron.schedule(entry.cron, async () => {
+    const s = getSock();
+    if (!s) { logger.warn('[agent] schedule "' + entry.goal.slice(0, 40) + '" skipped: no live connection'); return; }
+    shell.audit('SCHEDULE FIRED id=' + entry.id + ' goal="' + entry.goal.slice(0, 120) + '"');
+    const ctx = {
+      sock: s, jid: ownerDM(), sender: String(config.ownerNumber).replace(/\D/g, ''),
+      senderJid: ownerDM(), isOwner: true, isGroup: false, msg: { message: {} },
+      args: entry.goal.split(/\s+/),
+      reply: (t, o) => s.sendMessage(ownerDM(), { text: t, ...(o || {}) }),
+    };
+    try { await runShellMode(ctx, entry.goal); }
+    catch (e) { logger.warn('[agent] scheduled run failed: ' + (e?.message || 'error')); }
+  });
+  schedJobs.set(entry.id, task);
+  return true;
+}
+function initSchedules() {
+  for (const e of loadSchedules()) {
+    try { scheduleOne(e); } catch { /* skip bad entry */ }
+  }
+  const n = schedJobs.size;
+  if (n) logger.info('[agent] ' + n + ' scheduled task(s) armed');
+}
+
+// ---- Health watch ---------------------------------------------------------
+const HEARTBEAT = path.join('data', 'heartbeat');
+let ramAlertedAt = 0;
+function initHealthWatch() {
+  let downSince = null;
+  try {
+    const prev = Number(fs.readFileSync(HEARTBEAT, 'utf8'));
+    if (Date.now() - prev > 5 * 60e3) downSince = new Date(prev).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  } catch { /* first ever boot */ }
+  const beat = () => { try { fs.mkdirSync('data', { recursive: true }); fs.writeFileSync(HEARTBEAT, String(Date.now())); } catch {} };
+  beat();
+  setInterval(beat, 120e3).unref?.();
+  // wait for a live socket, then alert if we recovered from a gap; also watch RAM
+  let bootAlertSent = false;
+  setInterval(() => {
+    const s = getSock();
+    if (!s) return;
+    if (downSince && !bootAlertSent) {
+      bootAlertSent = true;
+      shell.audit('HEALTH: was offline since ' + downSince + ', back now');
+      s.sendMessage(ownerDM(), { text: '⚠️ I was offline since about ' + downSince + ' (IST). I am back now and everything is running.' }).catch(() => {});
+    }
+    const rss = process.memoryUsage().rss / 1048576;
+    if (rss > 800 && Date.now() - ramAlertedAt > 6 * 3600e3) {
+      ramAlertedAt = Date.now();
+      shell.audit('HEALTH: RAM critical ' + Math.round(rss) + 'MB');
+      s.sendMessage(ownerDM(), { text: '⚠️ Memory is critically high (' + Math.round(rss) + ' MB). If I slow down, say "/agent restart" or "/agent free memory".' }).catch(() => {});
+    }
+  }, 30e3).unref?.();
+}
+
+// boot-time arming (commands are imported at startup)
+try { initSchedules(); } catch (e) { logger.warn('[agent] schedules init: ' + (e?.message || 'error')); }
+try { initHealthWatch(); } catch (e) { logger.warn('[agent] health init: ' + (e?.message || 'error')); }
+
+async function planRound(goal, transcript, jarvisCmds) {
+  const prev = transcript.length ? null : loadSession();
+  const history = (transcript.length
+    ? '\n\nWork already done and its output:\n' + transcript.join('\n---\n').slice(-2500) +
+      '\n\nIf the goal is achieved and the results look right, reply [{"done":"one-line verification"}]. Otherwise plan ONLY the next steps needed (fix or adapt if something failed).'
+    : '') + (prev
+    ? '\n\nPrevious task (for follow-up references like "that file" or "the same thing"): goal was "' + prev.goal + '"; outcome: ' + prev.summary
+    : '');
   try {
     const r = await askAi(
-      'You are Jarvis operating your own Linux server (Node.js WhatsApp bot app; code in src/, data in data/, cwd is the app root).\n' +
+      'You are Jarvis, a WhatsApp bot operating your own Linux server (Node.js app; code in src/, data in data/, cwd is the app root).\n' +
       'Owner instruction: ' + goal + '\n\n' +
-      'Break it into at most ' + SH_STEPS + ' POSIX shell commands run from the app root. Prefer simple standard tools (ls, du, df, find, ps, free, cat of non-secret files, tar, npm).\n' +
-      'Rules: never read or print .env, auth/ session files, or anything containing keys/tokens/passwords. Never attack or spy on other people.\n' +
-      'Reply with ONLY a JSON array like [{"sh":"ls -la data"}]. If the request is impossible or unsafe, reply [{"refuse":"short reason"}]. No other text.',
-      { allowKeyless: true, temperature: 0.1 });
-    plan = parseShellPlan(r?.text || r);
-  } catch (e) { logger.warn('[agent] shell planner failed: ' + (e?.message || 'error')); }
-  if (!plan) return editOrReply(ctx, live, 'I could not plan that safely. Try rephrasing the instruction.');
-  if (plan.refuse) return editOrReply(ctx, live, 'I can\'t do that: ' + plan.refuse);
+      'Carry it out step by step. Reply with ONLY a JSON array of at most ' + SH_STEPS + ' steps:\n' +
+      '1. {"sh":"<one POSIX shell command run from the app root>"} - file work, code/config edits, disk/process checks, curl API lookups, npm, tar.\n' +
+      '2. {"cmd":"<jarvis command name>","args":"<args>"} - run one of your own bot commands. Prefer this when a command fits. Command index (Category(count): sample names - you may use ANY name shown; near-misses are auto-corrected): ' + jarvisCmds + '\n' +
+      '3. {"send":{"to":"<phone digits only>","text":"<message>"}} - send a WhatsApp message from Jarvis\'s own number.\n' +
+      '4. {"restart":true} - restart the bot (only when actually needed).\n' +
+      '5. Reviactyl panel control via shell curl (env vars REVIACTYL_PANEL_URL and REVIACTYL_CLIENT_KEY are set):\n' +
+      '   - status/resources: curl -s -H "Authorization: Bearer $REVIACTYL_CLIENT_KEY" $REVIACTYL_PANEL_URL/api/client/servers/ccedcbbd/resources\n' +
+      '   - list files: curl -s -H "Authorization: Bearer $REVIACTYL_CLIENT_KEY" "$REVIACTYL_PANEL_URL/api/client/servers/ccedcbbd/files/list?directory=/"\n' +
+      '   - power: curl -s -X POST -H "Authorization: Bearer $REVIACTYL_CLIENT_KEY" -H "Content-Type: application/json" -d \'{"signal":"restart"}\' $REVIACTYL_PANEL_URL/api/client/servers/ccedcbbd/power\n' +
+      '   Only ever use the "restart" signal - never "stop" or "kill", even if asked (they would take Jarvis fully offline). Prefer {"restart":true} for a normal bot restart.\n' +
+      'Rules: never read or print .env, auth/ session files, or anything containing keys/tokens/passwords. Never attack, spam, or spy on other people.\n' +
+      '6. {"schedule":{"cron":"<5-field cron>","goal":"<future instruction>"}} - set a recurring task (IST timezone). Use for "every night 2am" style requests.\n' +
+      'If the request is impossible or unsafe, reply [{"refuse":"short reason"}].\n' +
+      'If a required detail is missing (e.g. WHICH song, WHICH file, WHOSE number), reply [{"ask":"one short question"}] - never guess names, numbers or recipients.\n' +
+      'For "download/play a song" style goals, use the play command. No other text.' + history,
+      { allowKeyless: true, temperature: 0.1, prefer: 'groq' });
+    return parseShellPlan(r?.text || r);
+  } catch (e) {
+    logger.warn('[agent] planner failed: ' + (e?.message || 'error'));
+    return null;
+  }
+}
 
-  const runnable = [], staged = [];
-  for (const sh of plan.steps) {
-    const cls = shell.classify(sh);
-    if (cls === 'secret') return editOrReply(ctx, live, 'Stopped: one step would read secrets (.env/auth/keys). I never print those. Rephrase without touching secret files.');
-    if (cls === 'refused') return editOrReply(ctx, live, 'I refuse that - it looks like an attack or privacy violation.');
-    (cls === 'destructive' ? staged : runnable).push(sh);
+async function execStep(ctx, step, results) {
+  if (step.type === 'note') { results.push({ cmd: 'note', code: 0, out: step.text }); return; }
+  if (step.type === 'schedule') {
+    const list = loadSchedules();
+    const entry = { id: Math.random().toString(36).slice(2, 8), cron: step.cron, goal: step.goal, createdAt: Date.now() };
+    if (scheduleOne(entry)) {
+      list.push(entry); saveSchedules(list);
+      shell.audit('SCHEDULE SET id=' + entry.id + ' cron="' + entry.cron + '" goal="' + entry.goal + '"');
+      results.push({ cmd: 'schedule "' + step.goal.slice(0, 60) + '"', code: 0, out: 'Scheduled: ' + step.cron + ' (IST). It will run and report here. To cancel, say "/agent unschedule ' + entry.id + '".' });
+    } else {
+      results.push({ cmd: 'schedule', code: 1, out: 'Invalid cron "' + step.cron + '"' });
+    }
+    return;
+  }
+  if (step.type === 'send') {
+    try {
+      await ctx.sock.sendMessage(step.to + '@s.whatsapp.net', { text: step.text });
+      logger.info('[agent] sent WhatsApp message to ' + step.to + ' (' + step.text.length + ' chars)');
+      shell.audit('SEND to=' + step.to + ' text="' + step.text.slice(0, 200) + '"');
+      results.push({ cmd: 'send message to ' + step.to, code: 0, out: 'Delivered: "' + step.text.slice(0, 120) + '"' });
+    } catch (e) {
+      results.push({ cmd: 'send message to ' + step.to, code: 1, out: 'Failed: ' + (e?.message || 'error') });
+    }
+    return;
+  }
+  if (step.type === 'cmd') {
+    const cmd = registry.get(step.cmd);
+    const cap = [];
+    try {
+      await cmd.run({ ...ctx, args: step.args ? step.args.split(/\s+/) : [], reply: async (t) => { cap.push(String(t).slice(0, 500)); return null; } });
+      logger.info('[agent] ran /' + step.cmd + ' ' + step.args);
+      shell.audit('CMD /' + step.cmd + ' ' + step.args);
+      results.push({ cmd: '/' + step.cmd + (step.args ? ' ' + step.args : ''), code: 0, out: cap.join('\n').slice(0, 1500) || 'Done.' });
+    } catch (e) {
+      results.push({ cmd: '/' + step.cmd, code: 1, out: 'Failed: ' + (e?.message || 'error') });
+    }
+    return;
+  }
+  const r = await shell.execShell(step.sh);
+  logger.info('[agent] shell: ' + step.sh.slice(0, 80) + ' -> ' + r.code);
+  shell.audit('SHELL ' + step.sh + ' -> exit ' + r.code);
+  results.push({ cmd: step.sh, ...r });
+}
+
+async function runUndo(ctx) {
+  let files = [];
+  try { files = fs.readdirSync('data').filter((f) => /^ops-backup-.*\.tar\.gz$/.test(f)).sort(); } catch {}
+  if (!files.length) return ctx.reply('No backup found to undo to. Nothing has been changed through me yet.');
+  const newest = 'data/' + files[files.length - 1];
+  const preview = await shell.execShell('tar tzf ' + JSON.stringify(newest) + ' | head -15');
+  shell.stage(['tar -xzf ' + JSON.stringify(newest)]);
+  shell.audit('UNDO STAGED restore=' + newest);
+  await ctx.reply('↩️ Undo: I will restore everything from backup ' + files[files.length - 1] + '. It contains:\n' + (preview.out || '(listing failed)') +
+    '\nReply YES within 5 minutes to restore, or NO to cancel.');
+}
+
+async function runUnschedule(ctx, id) {
+  const list = loadSchedules();
+  const found = list.find((e) => e.id === id);
+  if (!found) return ctx.reply('No scheduled task with id "' + id + '". Say "/agent schedules" to see them.');
+  const task = schedJobs.get(id); if (task) { try { task.stop(); } catch {} schedJobs.delete(id); }
+  saveSchedules(list.filter((e) => e.id !== id));
+  shell.audit('UNSCHEDULE id=' + id + ' goal="' + found.goal.slice(0, 80) + '"');
+  await ctx.reply('Removed the scheduled task "' + found.goal.slice(0, 80) + '" (' + found.cron + '). It will not run again.');
+}
+
+async function runListSchedules(ctx) {
+  const list = loadSchedules();
+  if (!list.length) return ctx.reply('No scheduled tasks set. Example: "/agent every night at 2am clean old logs".');
+  await ctx.reply('Scheduled tasks:\n' + list.map((e) => '- [' + e.id + '] "' + e.goal.slice(0, 60) + '" at ' + e.cron + ' (IST)').join('\n'));
+}
+
+async function runShellMode(ctx, goal) {
+  // Raw output on request
+  if (/^(raw|raw output|exact output)$/i.test(goal)) {
+    if (lastRaw && Date.now() - lastRaw.ts < 600e3) return ctx.reply('Exact output:\n' + lastRaw.text.slice(0, 3500));
+    return ctx.reply('No recent output to show. Run something first.');
+  }
+  const prog = createProgressMessage(ctx, 'task', 20000);
+  await prog.begin();
+  const tick = setInterval(() => { try { prog.update({}); } catch {} }, 20000); tick.unref?.();
+  const live = null; // the progress message owns the chat message now
+  // Full registry, compact: every category with counts + sample names; names are fuzzy-resolved on use.
+  const byCat = new Map();
+  for (const c of registry.list()) {
+    const k = c.category || 'Misc';
+    if (!byCat.has(k)) byCat.set(k, []);
+    byCat.get(k).push(c.name);
+  }
+  const jarvisCmds = [...byCat.entries()].sort().map(([k, v]) => k + '(' + v.length + '): ' + v.slice(0, 10).join(' ')).join('; ');
+  const transcript = [], results = [];
+  const stagedShells = [];
+  let stagedRestarts = 0, finalNote = null, executed = 0;
+
+  const goalNumbers = (goal.match(/\+?[0-9][0-9\s-]{6,16}[0-9]/g) || []).map((s) => s.replace(/\D/g, ''));
+  const ownNumber = String(config.ownerNumber).replace(/\D/g, '');
+  for (let round = 1; round <= 4 && executed < 12; round++) {
+    let plan = null;
+    try {
+      plan = await planRound(goal, transcript, jarvisCmds);
+    } catch (e) {
+      logger.warn('[agent] round ' + round + ' crashed: ' + (e?.stack || e?.message || 'error'));
+      if (round === 1) finalNote = 'Something went wrong while planning. Try again in a moment.';
+      break;
+    }
+    if (!plan) { if (round === 1) finalNote = 'I could not plan that safely. Try rephrasing the instruction.'; break; }
+    if (plan.refuse) { finalNote = 'I can\'t do that: ' + plan.refuse; break; }
+    if (plan.ask) { finalNote = plan.ask; break; }
+    if (plan.done) { logger.info('[agent] verified: ' + plan.done); break; }
+
+    const runnable = [];
+    let blocked = null;
+    for (const step of plan.steps) {
+      if (step.type === 'restart') { stagedRestarts++; continue; }
+      if (step.type === 'send') {
+        if (step.to !== ownNumber && !goalNumbers.includes(step.to)) {
+          runnable.push({ type: 'note', text: 'Skipped a message to ' + step.to + ' - I only message you, or a number you explicitly gave in the instruction.' });
+          continue;
+        }
+        runnable.push(step); continue;
+      }
+      if (step.type === 'cmd') {
+        if (CMD_BLOCK.has(step.cmd)) { runnable.push({ type: 'note', text: 'Skipped /' + step.cmd + ' - group admin and system commands are never auto-run.' }); continue; }
+        const found = resolveCmd(step.cmd);
+        if (!found) runnable.push({ type: 'note', text: 'The /' + step.cmd + ' command is not available, so that part was skipped.' });
+        else runnable.push({ type: 'cmd', cmd: found.name, args: step.args });
+        continue;
+      }
+      if (/npm\s+run\s+start|node\s+(\.\/)?(src\/)?index\.js/.test(step.sh)) {
+        runnable.push({ type: 'note', text: 'Skipped starting a second Jarvis process - it is already running. Use a restart step instead.' });
+        continue;
+      }
+      if (/\/power\b/.test(step.sh) && /"signal"\s*:\s*"(stop|kill)"/.test(step.sh)) {
+        runnable.push({ type: 'note', text: 'Refused: stopping or killing the server would take Jarvis fully offline - only restart is allowed.' });
+        continue;
+      }
+      const cls = shell.classify(step.sh);
+      if (cls === 'secret') { blocked = 'Stopped: one step would read secrets (.env/auth/keys). I never print those. Rephrase without touching secret files.'; break; }
+      if (cls === 'refused') { blocked = 'I refuse that - it looks like an attack or privacy violation.'; break; }
+      (cls === 'destructive' ? stagedShells : runnable).push(step);
+    }
+    if (blocked) { finalNote = blocked; break; }
+
+    if (!runnable.length) {
+      if (stagedShells.length || stagedRestarts) break; // everything left needs a YES
+      if (round === 1) finalNote = 'Nothing to run for that.';
+      break;
+    }
+    let si = 0;
+    for (const step of runnable) {
+      si++;
+      const label = step.type === 'cmd' ? '/' + step.cmd : step.type === 'send' ? 'send message' : step.type === 'schedule' ? 'set schedule' : step.type === 'note' ? 'note' : String(step.sh || '').slice(0, 60);
+      try { prog.update({ name: 'Step ' + (executed + 1) + ': ' + label, received: executed, total: executed + (runnable.length - si + 1) }); } catch {}
+      try {
+        await execStep(ctx, step, results);
+      } catch (e) {
+        logger.warn('[agent] step crashed: ' + (e?.stack || e?.message || 'error'));
+        results.push({ cmd: step.sh || step.cmd || step.type, code: 1, out: 'Step failed internally: ' + (e?.message || 'error') });
+      }
+      executed++;
+      transcript.push(results[results.length - 1].cmd + ' -> exit ' + results[results.length - 1].code + '\n' + results[results.length - 1].out);
+    }
+    if (stagedShells.length || stagedRestarts) break; // confirm before continuing
   }
 
-  const lines = [];
-  for (const sh of runnable) {
-    const r = await shell.execShell(sh);
-    logger.info('[agent] shell: ' + sh.slice(0, 80) + ' -> ' + r.code);
-    lines.push('`$ ' + sh.slice(0, 90) + '`' + (r.code ? ' (exit ' + r.code + ')' : '') + (r.out ? '\n' + r.out : ''));
+  if (results.length) {
+    lastRaw = { ts: Date.now(), text: results.map((r) => '$ ' + r.cmd + ' (exit ' + r.code + ')\n' + r.out).join('\n---\n') };
   }
-  let text = lines.join('\n---\n') || '';
-  if (staged.length) {
-    shell.stage(staged);
-    text += (text ? '\n\n' : '') + '⚠️ These need confirmation (a backup will be taken first):\n' +
-      staged.map((s, i) => (i + 1) + '. `$ ' + s.slice(0, 90) + '`').join('\n') +
-      '\n\nReply YES within 5 minutes to run them, or NO to cancel.';
+  const rawForAi = results.map((r) => r.cmd + ' -> exit ' + r.code + (r.out ? '\n' + r.out : '')).join('\n');
+  let text = finalNote || (results.length ? ((await summarize(rawForAi)) || fallbackSummary(results)) : 'Nothing to run for that.');
+
+  if (stagedShells.length || stagedRestarts) {
+    shell.stage(stagedShells, { restarts: stagedRestarts });
+    shell.audit('STAGED shells=' + JSON.stringify(stagedShells).slice(0, 300) + ' restarts=' + stagedRestarts);
+    const info = shell.describeTargets(stagedShells);
+    const parts = [];
+    if (stagedShells.length) {
+      parts.push(info.count > 0
+        ? 'change/delete ' + info.count + ' item(s) on the server' + (info.bytes ? ' (about ' + fmtMB(info.bytes) + ')' : '')
+        : 'make a system-level change (e.g. stopping a process)');
+    }
+    if (stagedRestarts) parts.push('restart me (back in about a minute)');
+    text += (text ? '\n\n' : '') + '⚠️ This will ' + parts.join(' and ') +
+      '. A backup is taken automatically before anything runs.\nReply YES within 5 minutes to go ahead, or NO to cancel.';
   }
-  await editOrReply(ctx, live, text || 'Nothing to run.');
+  clearInterval(tick);
+  try { await prog.text(text); } catch { await ctx.reply(text); }
+  saveSession(goal, text);
 }
 
 async function runSafeMode(ctx, goal) {
@@ -152,6 +536,16 @@ export default {
     if (!featOn('agent')) return ctx.reply('Agent mode is turned off right now.');
     const goal = ctx.args.join(' ').trim().slice(0, MAX_GOAL);
     if (!goal) return ctx.reply('Tell me the goal. Example: ' + config.prefix + 'agent weather in Kolkata and today\'s top news');
+    // "/agent yes" and "/agent no" answer a pending destructive confirmation
+    if (/^(yes|no)$/i.test(goal) && featOn('ownershell')) {
+      if (await handlePendingAnswer(ctx, /^yes$/i.test(goal))) return;
+    }
+    if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) {
+      if (/^undo\b/i.test(goal)) return runUndo(ctx);
+      const um = goal.match(/^unschedule\s+(\w+)$/i);
+      if (um) return runUnschedule(ctx, um[1]);
+      if (/^(schedules|list schedules)$/i.test(goal)) return runListSchedules(ctx);
+    }
     if (!allow(ctx.sender, ctx.isOwner ? 10 : 3)) return ctx.reply('Agent mode is taking a breather. Try again in a little while.');
     if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) return runShellMode(ctx, goal);
     return runSafeMode(ctx, goal);
