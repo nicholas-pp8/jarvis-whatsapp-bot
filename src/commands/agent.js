@@ -336,17 +336,35 @@ async function runInstallFlow(ctx, goal) {
   let cmdName = parsed.cmdName || pkg.replace(/^@[^/]+\//, '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 15);
   if (registry.get(cmdName)) return ctx.reply('/' + cmdName + ' already exists - pick another command name, e.g. "/agent install ' + pkg + ' make a ' + cmdName + '2 command".');
   await ctx.reply('Writing the /' + cmdName + ' command...');
-  let code = '';
-  try {
-    code = await askAi('Write a WhatsApp bot command module (ESM JavaScript) for a Baileys bot. Output ONLY the JavaScript file content - no markdown fences, no explanation.\nContract:\nexport default {\n  name: \'' + cmdName + '\',\n  aliases: [],\n  category: \'Tools\',\n  description: \'<one short line>\',\n  usage: \'' + cmdName + ' <input>\',\n  minArgs: 1,\n  async run(ctx) { ... }\n};\nInside run(ctx): ctx.args is the user\'s words as a string array; await ctx.reply(text) sends a plain reply; keep replies short, plain English. Use the npm package "' + pkg + '" and Node builtins only. NEVER read or print process.env, tokens, keys, .env, or files under auth/. On missing input reply with the usage line. Wrap work in try/catch and reply a short honest error.\nPackage: ' + pkg + ' (' + String(meta.description || '').slice(0, 200) + ')\nOwner request: ' + goal.slice(0, 300));
-  } catch (e) { return ctx.reply('I could not write the command code right now (' + (e?.message || 'error') + '). Nothing was installed.'); }
-  code = String(code || '').trim().replace(/^```(?:js|javascript)?\s*/i, '').replace(/```\s*$/, '').trim();
-  const problems = [];
-  if (!/export\s+default/.test(code)) problems.push('missing export default');
-  if (!new RegExp("name:\\s*['\"]" + cmdName + "['\"]").test(code)) problems.push('name mismatch');
-  if (!/async\s+run\s*\(/.test(code)) problems.push('missing async run');
-  if (/process\.env|auth\/|auth-backup|\.env\b|child_process|writeFileSync\s*\(\s*['\"][^'\"]*\.(env|key|pem)/.test(code)) problems.push('unsafe content');
-  if (problems.length) return ctx.reply('The generated /' + cmdName + ' code failed safety checks (' + problems.join(', ') + '). Nothing was installed - try again or rephrase.');
+  const bodyPrompt = 'Write ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function for a WhatsApp bot command named "/' + cmdName + '" using the npm package "' + pkg + '" (' + String(meta.description || 'no description').slice(0, 150) + ').\nOwner request: ' + goal.slice(0, 300) + '\nRules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load the package inside the body, e.g.: const Mod = (await import(\'' + pkg + '\')).default;\n- ctx.args is the user\'s words as a string array (at least one is guaranteed); await ctx.reply(text) sends a plain reply; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, or files under auth/. No child_process, no shell, no writes outside /tmp.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and reply a short honest error on failure. Keep it under 30 lines.';
+  const bodyProblem = (b) => {
+    if (!b) return 'the AI returned nothing';
+    if (/export\s+default|module\.exports/.test(b)) return 'it included export statements (inner statements only, no exports)';
+    if (/^\s*import\s/m.test(b)) return 'it used import statements (load the package with await import() inside the body instead)';
+    if (/\brequire\s*\(/.test(b)) return 'it used require() (use await import() inside the body instead)';
+    if (/process\.env|auth\/|auth-backup|\.env\b|child_process|\bexecSync\b|\bspawn\b/.test(b)) return 'it touched env/secrets/shell (not allowed)';
+    return null;
+  };
+  let code = null; let lastFail = '';
+  for (let attempt = 1; attempt <= 3 && !code; attempt++) {
+    let body = '';
+    try {
+      const r = await askAi(bodyPrompt + (lastFail ? '\nYour previous attempt was rejected because ' + lastFail + '. Output corrected statements only.' : ''), { temperature: 0.3 });
+      body = r && r.text ? r.text : '';
+    } catch (e) { lastFail = 'the AI call failed (' + (e?.message || 'error') + ')'; continue; }
+    body = String(body || '').trim().replace(/^```(?:js|javascript)?\s*/im, '').replace(/```\s*$/, '').trim();
+    const prob = bodyProblem(body);
+    if (prob) { lastFail = prob; shell.audit('CODEGEN attempt ' + attempt + ' rejected: ' + prob); continue; }
+    const candidate = 'export default {\n  name: \'' + cmdName + '\',\n  aliases: [],\n  category: \'Tools\',\n  description: ' + JSON.stringify(String(meta.description || pkg + ' helper').slice(0, 90)) + ',\n  usage: \'' + cmdName + ' <input>\',\n  minArgs: 1,\n  async run(ctx) {\n' + body + '\n  },\n};\n';
+    const chkFile = path.join('src', 'commands', '_chk-' + cmdName + '.mjs');
+    try { fs.writeFileSync(chkFile, candidate); } catch { lastFail = 'could not stage a temp file'; continue; }
+    const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
+    try { fs.unlinkSync(chkFile); } catch {}
+    if (chk.code === 0) { code = candidate; break; }
+    lastFail = 'syntax error: ' + String(chk.out || '').trim().split('\n').slice(-2).join(' ').slice(0, 150);
+    shell.audit('CODEGEN attempt ' + attempt + ' syntax error: ' + lastFail.slice(0, 100));
+  }
+  if (!code) return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Nothing was installed - try again or rephrase.');
   const tmpName = '_newcmd-' + cmdName + '.js';
   const tmpFile = path.join('src', 'commands', tmpName);
   fs.writeFileSync(tmpFile, code);
