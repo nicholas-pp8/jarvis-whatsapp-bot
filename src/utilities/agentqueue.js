@@ -30,6 +30,13 @@ export function failedItems() {
 
 // items: [{cmd, args}]. Appends to the running queue when one is active.
 export function enqueue(jid, items, goal) {
+  if (liveQueue && !liveQueue.finishedAt) {
+    liveQueue.items.push(...items.map((i) => ({ cmd: i.cmd, args: i.args, status: 'pending', attempts: 0 })));
+    save(liveQueue);
+    audit('QUEUE SET ' + items.length + ' item(s) via /' + (items[0]?.cmd || '?') + ' goal="' + String(goal || '').slice(0, 120) + '" (appended to running queue)');
+    setImmediate(processQueue);
+    return liveQueue;
+  }
   let q = load();
   if (q && !q.finishedAt && Array.isArray(q.items)) {
     q.items.push(...items.map((i) => ({ cmd: i.cmd, args: i.args, status: 'pending', attempts: 0 })));
@@ -65,6 +72,8 @@ export function initAgentQueue() {
   }
 }
 
+let liveQueue = null; // in-memory queue owned by the running processor; enqueue appends land here directly
+
 const FAIL_RE = /(fail|could ?n'?t|not found|no results|error|unavailable|try again later)/i;
 
 async function processQueue() {
@@ -73,6 +82,7 @@ async function processQueue() {
   try {
     let q = load();
     if (!q || q.finishedAt || !q.items?.some((i) => i.status === 'pending')) return;
+    liveQueue = q;
     const sock = getSock();
     if (!sock) { initAgentQueue(); return; }
     const own = String(config.ownerNumber).replace(/\D/g, '');
@@ -88,7 +98,7 @@ async function processQueue() {
           if (Buffer.isBuffer(m)) n = m.length;
           else if (m.url && !/^https?:/i.test(String(m.url))) { try { n = (await fs.promises.stat(String(m.url))).size; } catch { /* unmeasurable */ } }
           if (n > 0) {
-            const cur = load();
+            const cur = liveQueue || load();
             if (cur) { cur.bytes = (cur.bytes || 0) + n; save(cur); }
             try {
               prog.update({
@@ -114,6 +124,11 @@ async function processQueue() {
     await prog.begin();
     while (true) {
       q = load() || q;
+      if (!liveQueue || liveQueue !== q) {
+        // preserve any liveQueue appends that have not been saved yet
+        if (liveQueue && liveQueue.items.length > q.items.length) q.items.push(...liveQueue.items.slice(q.items.length));
+        liveQueue = q;
+      }
       const total = q.items.length;
       const item = q.items.find((i) => i.status === 'pending');
       if (!item) break;
@@ -151,6 +166,7 @@ async function processQueue() {
   } catch (e) {
     logger.warn('[agentqueue] runner crashed: ' + (e?.stack || e?.message || 'error'));
   } finally {
+    liveQueue = null;
     processing = false;
   }
 }

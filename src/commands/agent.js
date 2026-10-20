@@ -95,7 +95,9 @@ function parseShellPlan(raw) {
         const cmd = String(s.bulk.cmd || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         const items = (Array.isArray(s.bulk.items) ? s.bulk.items : [])
           .map((i) => String(i).slice(0, MAX_ARG).replace(/[\r\n]/g, ' ').trim()).filter(Boolean);
-        if (!cmd || items.length < 2) return null;
+        if (!cmd || items.length < 1) return null;
+        const prev = steps[steps.length - 1];
+        if (prev && prev.type === 'bulk' && prev.cmd === cmd) { prev.items.push(...items); continue; }
         steps.push({ type: 'bulk', cmd, items });
         continue;
       }
@@ -356,7 +358,7 @@ async function planRound(goal, transcript, jarvisCmds) {
       'Carry it out step by step. Reply with ONLY a JSON array of at most ' + SH_STEPS + ' steps:\n' +
       '1. {"sh":"<one POSIX shell command run from the app root>"} - file work, code/config edits, disk/process checks, curl API lookups, npm, tar.\n' +
       '2. {"cmd":"<jarvis command name>","args":"<args>"} - run one of your own bot commands. Prefer this when a command fits. You may use ANY command, including owner and group-admin ones. Command index (Category(count): sample names; near-misses are auto-corrected): ' + jarvisCmds + '\n' +
-      '3. {"bulk":{"cmd":"play","items":["<item>","<item>", ...]}} - bulk media delivery (2-25 items of the same kind). Each item is downloaded and delivered in this chat one by one, paced, with retries and its own progress. Use it for "download N songs/videos" goals: pick that artist\'s most popular tracks or the best matches yourself, up to the requested count.\n' +
+      '3. {"bulk":{"cmd":"play","items":["<item>","<item>", ...]}} - bulk media delivery (2 or more items of the same kind; for large counts prefer ONE bulk step with all items). Each item is downloaded and delivered in this chat one by one, paced, with retries and its own progress. Use it for "download N songs/videos" goals: pick that artist\'s most popular tracks or the best matches yourself, matching the requested count exactly (for N items, produce N items).\n' +
       '4. {"send":{"to":"<phone digits only>","text":"<message>"}} - send a WhatsApp message from Jarvis\'s own number.\n' +
       '5. {"restart":true} - restart the bot (only when actually needed, e.g. after code edits).\n' +
       '6. Reviactyl panel control via shell curl (env vars REVIACTYL_PANEL_URL and REVIACTYL_CLIENT_KEY are set):\n' +
@@ -378,8 +380,10 @@ async function planRound(goal, transcript, jarvisCmds) {
       'Judge every instruction on its OWN intent - never answer a previous task\'s pending question when the instruction is a new topic.\n' +
       'Examples:\n' +
       '- "love" -> [{"ask":"Love what - a love quote, a romantic song, shayari?"}]\n' +
-      '- "download arijit singh love songs" -> [{"bulk":{"cmd":"play","items":["Tum Hi Ho","Channa Mereya","Agar Tum Saath Ho","Raabta","Ae Dil Hai Mushkil"]}}]\n' +
-      '- "download 20 couple memes from pinterest" -> [{"bulk":{"cmd":"pinterest","items":["album couple meme","album funny couple meme","album couple meme hindi","album cute couple meme","album couple meme quotes","album desi couple meme","album couple meme love"]}}] - for Pinterest use "album <query>" args (3 pins each) and vary the queries to reach the count.\n' +
+      '- If the request says "video" ("video song", "video songs", "videos", "mp4"), use the video command (MP4), not play. Use play only when the request asks for audio/mp3/songs without the word video.\n' +
+    '- "download arijit singh love songs" -> [{"bulk":{"cmd":"play","items":["Tum Hi Ho","Channa Mereya","Agar Tum Saath Ho","Raabta","Ae Dil Hai Mushkil"]}}]\n' +
+      '- "download 100 couple kissing videos from pinterest" -> [{"bulk":{"cmd":"pinterest","items":["couple kissing video","romantic couple kissing video","couple kissing hd video", ...]}}] - for pinterest VIDEO requests, end every item query with the word "video" (the downloader detects it); never use "album" for videos, albums are images.\n' +
+    '- "download 20 couple memes from pinterest" -> [{"bulk":{"cmd":"pinterest","items":["album couple meme","album funny couple meme","album couple meme hindi","album cute couple meme","album couple meme quotes","album desi couple meme","album couple meme love"]}}] - for Pinterest use "album <query>" args (3 pins each) and vary the queries to reach the count.\n' +
       '- "how much ram is free" -> [{"sh":"free -m"}]\n' +
       '- "every night 2am cleanup" -> [{"schedule":{"cron":"0 2 * * *","goal":"clean old logs and temp files"}}]\n' +
       'For a single "download/play a song" goal, use one play command step. No other text.' + history,
@@ -421,7 +425,7 @@ async function execStep(ctx, step, results) {
   if (step.type === 'bulk') {
     try {
       agentqueue.enqueue(ctx.jid, step.items.map((a) => ({ cmd: step.cmd, args: a })), ctx.__goal || 'bulk download');
-      results.push({ cmd: 'bulk /' + step.cmd + ' x' + step.items.length, code: 0, out: 'Queued ' + step.items.length + ' downloads. They arrive in this chat one by one, each with retries - watch the separate progress message. Say "/agent retry" later to redo any that fail.' });
+      results.push({ cmd: 'bulk /' + step.cmd + ' x' + step.items.length, code: 0, out: 'Queued ' + step.items.length + ' downloads via /' + step.cmd + '. Sending them to this chat one by one, each with retries - watch the separate progress message. Say "/agent retry" later to redo any that fail.' });
     } catch (e) {
       results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Failed to queue: ' + (e?.message || 'error') });
     }
@@ -530,6 +534,7 @@ async function runShellModeBody(ctx, goal, tid) {
 
     const runnable = [];
     let blocked = null;
+    const goalWantsVideo = /\bvideos?\b|\bmp4\b/i.test(goal) && !/\b(audio|mp3)\b/i.test(goal);
     for (const step of plan.steps) {
       if (step.type === 'restart') { restartsPlanned++; continue; }
       if (step.type === 'send') {
@@ -542,13 +547,21 @@ async function runShellModeBody(ctx, goal, tid) {
       if (step.type === 'cmd') {
         const found = resolveCmd(step.cmd);
         if (!found) runnable.push({ type: 'note', text: 'The /' + step.cmd + ' command is not available, so that part was skipped.' });
-        else runnable.push({ type: 'cmd', cmd: found.name, args: step.args });
+        else {
+          let name = found.name;
+          if (name === 'play' && goalWantsVideo && resolveCmd('video')) name = 'video';
+          runnable.push({ type: 'cmd', cmd: name, args: step.args });
+        }
         continue;
       }
       if (step.type === 'bulk') {
         const found = resolveCmd(step.cmd);
         if (!found) runnable.push({ type: 'note', text: 'The /' + step.cmd + ' command is not available, so the bulk download was skipped.' });
-        else runnable.push({ type: 'bulk', cmd: found.name, items: step.items });
+        else {
+          let name = found.name;
+          if (name === 'play' && goalWantsVideo && resolveCmd('video')) name = 'video';
+          runnable.push({ type: 'bulk', cmd: name, items: step.items });
+        }
         continue;
       }
       if (/npm\s+run\s+start|node\s+(\.\/)?(src\/)?index\.js/.test(step.sh)) {
@@ -592,12 +605,15 @@ async function runShellModeBody(ctx, goal, tid) {
     lastRaw = { ts: Date.now(), text: results.map((r) => '$ ' + r.cmd + ' (exit ' + r.code + ')\n' + r.out).join('\n---\n') };
   }
   const rawForAi = results.map((r) => r.cmd + ' -> exit ' + r.code + (r.out ? '\n' + r.out : '')).join('\n');
-  let text = finalNote || (results.length ? ((await summarize(rawForAi)) || fallbackSummary(results)) : 'Nothing to run for that.');
+  const bulkOnly = results.length > 0 && results.every((r) => r.code === 0 && /^bulk \//.test(r.cmd));
+  let text = finalNote || (bulkOnly ? results.map((r) => r.out).join('\n')
+    : (results.length ? ((await summarize(rawForAi)) || fallbackSummary(results)) : 'Nothing to run for that.'));
 
   if (stagedShells.length) {
-    shell.stage(stagedShells, { restarts: restartsPlanned });
-    shell.audit('STAGED shells=' + JSON.stringify(stagedShells).slice(0, 300) + ' restarts=' + restartsPlanned);
-    const info = shell.describeTargets(stagedShells);
+    const stagedCmds = stagedShells.map((s) => s.sh);
+    shell.stage(stagedCmds, { restarts: restartsPlanned });
+    shell.audit('STAGED shells=' + JSON.stringify(stagedCmds).slice(0, 300) + ' restarts=' + restartsPlanned);
+    const info = shell.describeTargets(stagedCmds);
     const parts = [];
     parts.push(info.count > 0
       ? 'change/delete ' + info.count + ' item(s) on the server' + (info.bytes ? ' (about ' + fmtMB(info.bytes) + ')' : '')

@@ -76,6 +76,7 @@ export const clearPending = () => { pending = null; };
 export async function backupTargets(cmds) {
   const targets = new Set();
   for (const c of cmds) {
+    if (typeof c !== 'string') continue;
     for (const m of c.matchAll(/(?:rm|mv|cp|truncate|shred)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|]+)/gi)) targets.add(m[1]);
     for (const m of c.matchAll(/>\s*([^\s;&|]+)/g)) targets.add(m[1]);
   }
@@ -95,6 +96,7 @@ export async function backupTargets(cmds) {
 export function describeTargets(cmds) {
   const targets = new Set();
   for (const c of cmds) {
+    if (typeof c !== 'string') continue;
     for (const m of c.matchAll(/(?:rm|mv|cp|truncate|shred)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|]+)/gi)) targets.add(m[1]);
     for (const m of c.matchAll(/>\s*([^\s;&|]+)/g)) targets.add(m[1]);
   }
