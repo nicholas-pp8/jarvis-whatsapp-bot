@@ -335,8 +335,33 @@ async function runInstallFlow(ctx, goal) {
   }
   let cmdName = parsed.cmdName || pkg.replace(/^@[^/]+\//, '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 15);
   if (registry.get(cmdName)) return ctx.reply('/' + cmdName + ' already exists - pick another command name, e.g. "/agent install ' + pkg + ' make a ' + cmdName + '2 command".');
+  shell.stage([], { kind: 'install', install: { pkg, version: meta.version, cmdName, desc: String(meta.description || '').slice(0, 150), finalFile: path.join('src', 'commands', cmdName + '.js') } });
+  shell.audit('INSTALL STAGED ' + pkg + '@' + meta.version + ' as /' + cmdName);
+  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). After a self-test passes, Jarvis restarts and /' + cmdName + ' is live.\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+}
+async function probeExports(pkg) {
+  const r = await shell.execShell('node -e "import(process.argv[1]).then(m=>{const ks=Object.keys(m);console.log(JSON.stringify({keys:ks.slice(0,25),hasDefault:!!m.default}))}).catch(e=>{console.log(JSON.stringify({probeError:String(e.message||e).slice(0,120)}))})" ' + JSON.stringify(pkg), { timeoutMs: 45000 });
+  try { return JSON.parse((r.out || '').trim().split('\n').pop()); } catch { return {}; }
+}
+async function runInstallConfirmed(ctx, p) {
+  const { pkg, version, cmdName, desc, finalFile } = p.install;
+  const tmpFile = path.join('src', 'commands', '_newcmd-' + cmdName + '.js');
+  await ctx.reply('Confirmed - installing ' + pkg + ', writing /' + cmdName + ', self-testing, then restarting...');
+  const inst = await shell.execShell('npm install ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 240000 });
+  shell.audit('INSTALL ' + pkg + ' -> exit ' + inst.code);
+  if (inst.code !== 0) return ctx.reply('npm install failed, nothing was added:\n' + String(inst.out || '').slice(-400));
+  const rollback = async (why) => {
+    await shell.execShell('npm uninstall ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 180000 });
+    try { fs.unlinkSync(tmpFile); } catch {}
+    shell.audit('INSTALL ' + pkg + ' rolled back: ' + why.slice(0, 120));
+  };
+  const exp = await probeExports(pkg);
+  shell.audit('INSTALL probe ' + pkg + ': ' + JSON.stringify(exp).slice(0, 150));
+  const expLine = exp.probeError
+    ? 'The package could not be probed (' + exp.probeError + '); be conservative and follow its README conventions.'
+    : 'The installed package\'s real top-level exports are: ' + (exp.keys && exp.keys.length ? exp.keys.join(', ') : '(none)') + '.' + (exp.hasDefault ? ' It HAS a default export.' : ' It has NO default export - use the named exports, e.g. const { Name } = await import(\'' + pkg + '\'); and construct/call as its docs describe.');
   await ctx.reply('Writing the /' + cmdName + ' command...');
-  const bodyPrompt = 'Write ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function for a WhatsApp bot command named "/' + cmdName + '" using the npm package "' + pkg + '" (' + String(meta.description || 'no description').slice(0, 150) + ').\nOwner request: ' + goal.slice(0, 300) + '\nRules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load the package inside the body, e.g.: const Mod = (await import(\'' + pkg + '\')).default;\n- ctx.args is the user\'s words as a string array (at least one is guaranteed); await ctx.reply(text) sends a plain reply; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, or files under auth/. No child_process, no shell, no writes outside /tmp.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and reply a short honest error on failure. Keep it under 30 lines.';
+  const bodyPrompt = 'Write ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function for a WhatsApp bot command named "/' + cmdName + '" using the npm package "' + pkg + '" (' + (desc || 'no description') + ').\n' + expLine + '\nOwner request: install ' + pkg + ' and provide /' + cmdName + '.\nRules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load the package inside the body with await import() using the REAL exports listed above.\n- ctx.args is the user\'s words as a string array (at least one is guaranteed); await ctx.reply(text) sends a plain reply; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, or files under auth/. No child_process, no shell, no writes outside /tmp.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and on failure reply with the actual error message (first 100 chars), never a generic "failed" message. Keep it under 30 lines.';
   const bodyProblem = (b) => {
     if (!b) return 'the AI returned nothing';
     if (/export\s+default|module\.exports/.test(b)) return 'it included export statements (inner statements only, no exports)';
@@ -355,7 +380,7 @@ async function runInstallFlow(ctx, goal) {
     body = String(body || '').trim().replace(/^```(?:js|javascript)?\s*/im, '').replace(/```\s*$/, '').trim();
     const prob = bodyProblem(body);
     if (prob) { lastFail = prob; shell.audit('CODEGEN attempt ' + attempt + ' rejected: ' + prob); continue; }
-    const candidate = 'export default {\n  name: \'' + cmdName + '\',\n  aliases: [],\n  category: \'Tools\',\n  description: ' + JSON.stringify(String(meta.description || pkg + ' helper').slice(0, 90)) + ',\n  usage: \'' + cmdName + ' <input>\',\n  minArgs: 1,\n  async run(ctx) {\n' + body + '\n  },\n};\n';
+    const candidate = 'export default {\n  name: \'' + cmdName + '\',\n  aliases: [],\n  category: \'Tools\',\n  description: ' + JSON.stringify((desc || pkg + ' helper').slice(0, 90)) + ',\n  usage: \'' + cmdName + ' <input>\',\n  minArgs: 1,\n  async run(ctx) {\n' + body + '\n  },\n};\n';
     const chkFile = path.join('src', 'commands', '_chk-' + cmdName + '.mjs');
     try { fs.writeFileSync(chkFile, candidate); } catch { lastFail = 'could not stage a temp file'; continue; }
     const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
@@ -364,22 +389,8 @@ async function runInstallFlow(ctx, goal) {
     lastFail = 'syntax error: ' + String(chk.out || '').trim().split('\n').slice(-2).join(' ').slice(0, 150);
     shell.audit('CODEGEN attempt ' + attempt + ' syntax error: ' + lastFail.slice(0, 100));
   }
-  if (!code) return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Nothing was installed - try again or rephrase.');
-  const tmpName = '_newcmd-' + cmdName + '.js';
-  const tmpFile = path.join('src', 'commands', tmpName);
+  if (!code) { await rollback('codegen failed: ' + lastFail); return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Rolled back: package uninstalled, nothing added - try again or rephrase.'); }
   fs.writeFileSync(tmpFile, code);
-  const chk = await shell.execShell('node --check ' + JSON.stringify(tmpFile), { timeoutMs: 30000 });
-  if (chk.code !== 0) { try { fs.unlinkSync(tmpFile); } catch {} return ctx.reply('The generated /' + cmdName + ' code has a syntax error. Nothing was installed - try again.'); }
-  shell.stage([], { kind: 'install', install: { pkg, version: meta.version, cmdName, tmpFile, finalFile: path.join('src', 'commands', cmdName + '.js') } });
-  shell.audit('INSTALL STAGED ' + pkg + '@' + meta.version + ' as /' + cmdName);
-  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). After a self-test passes, Jarvis restarts and /' + cmdName + ' is live.\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
-}
-async function runInstallConfirmed(ctx, p) {
-  const { pkg, version, cmdName, tmpFile, finalFile } = p.install;
-  await ctx.reply('Confirmed - installing ' + pkg + ', self-testing /' + cmdName + ', then restarting...');
-  const inst = await shell.execShell('npm install ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 240000 });
-  shell.audit('INSTALL ' + pkg + ' -> exit ' + inst.code);
-  if (inst.code !== 0) { try { fs.unlinkSync(tmpFile); } catch {} return ctx.reply('npm install failed, nothing was added:\n' + String(inst.out || '').slice(-400)); }
   try {
     const mod = await import('./' + path.basename(tmpFile) + '?t=' + Date.now());
     const cmd = mod.default;
@@ -397,7 +408,7 @@ async function runInstallConfirmed(ctx, p) {
   }
   fs.renameSync(tmpFile, finalFile);
   shell.audit('COMMAND ADDED /' + cmdName + ' (package ' + pkg + ')');
-  await ctx.reply('Installed ' + pkg + (version ? ' v' + version : '') + '. /' + cmdName + ' passed its self-test. Restarting Jarvis now - back in about a minute with /' + cmdName + ' live. (Rollback: "/agent remove the ' + cmdName + ' command".)');
+  await ctx.reply('Installed ' + pkg + (version ? ' v' + version : '') + '. /' + cmdName + ' loads correctly (usage self-test passed). Restarting Jarvis now - back in about a minute. Honest note: real features are only proven when you run them; if /' + cmdName + ' errors, it will now show the real reason. (Rollback: "/agent remove the ' + cmdName + ' command".)');
   try { const { shutdown } = await import('../connection/whatsapp.js'); setTimeout(() => shutdown(0), 3000); } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
   return true;
 }
