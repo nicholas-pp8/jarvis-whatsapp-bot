@@ -14,6 +14,7 @@ import { acquireLock, releaseLock } from './utilities/instancelock.js';
 import { restoreIfNeeded, startAuthBackup } from './utilities/authbackup.js';
 
 async function main() {
+  try { await (await import('./utilities/updateguard.js')).onBootStart(); } catch (e) { logger.error('[updateguard] boot check failed:', e); }
   if (!acquireLock()) { logger.error('Another Jarvis instance is already running (lock held). Refusing to start a second one - two instances would fight over the WhatsApp session.'); process.exit(1); }
   try { await (await import('./utils/banner.js')).playBanner({ name: config.botName }); } catch {}
   logger.info(`Starting ${config.botName} (prefix "${config.prefix}", auto status view ${config.autoStatusView ? 'on' : 'off'})`);

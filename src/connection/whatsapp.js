@@ -252,6 +252,13 @@ export async function startWhatsApp() {
         reconnectAttempts = 0;
         pairingAttempts = 0;
         logger.info('WhatsApp connection established');
+        try {
+          const { onConnected } = await import('../utilities/updateguard.js');
+          const { registry: reg2, commandLoadFailures: clf2 } = await import('../handlers/commandHandler.js');
+          onConnected({ registry: reg2, commandLoadFailures: clf2 }).then((verdict) => {
+            if (verdict && config.ownerNumber) s.sendMessage(config.ownerNumber.replace(/\D/g, '') + '@s.whatsapp.net', { text: verdict }).catch(() => {});
+          }).catch(() => {});
+        } catch {}
         writeState('connected', { code: null });
         startAutobio(s);
         pairing?.onLinked().catch(() => {});

@@ -66,7 +66,7 @@ export function execShell(cmd, { timeoutMs = 60000 } = {}) {
 // Staging + confirmation
 let pending = null; // {id, cmds, createdAt}
 export function stage(cmds, extra = {}) {
-  pending = { id: crypto.randomBytes(3).toString('hex'), cmds, restarts: extra.restarts || 0, createdAt: Date.now() };
+  pending = { id: crypto.randomBytes(3).toString('hex'), cmds, restarts: extra.restarts || 0, note: extra.note || null, kind: extra.kind || null, install: extra.install || null, createdAt: Date.now() };
   return pending;
 }
 export const getPending = () => (pending && Date.now() - pending.createdAt < 5 * 60e3 ? pending : null);

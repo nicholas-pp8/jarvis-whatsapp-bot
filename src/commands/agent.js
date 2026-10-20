@@ -237,6 +237,8 @@ export async function handlePendingAnswer(ctx, isYes) {
     return true;
   }
   shell.clearPending();
+  if (p.kind === 'install') return runInstallConfirmed(ctx, p);
+  if (p.kind === 'update') return runUpdateConfirmed(ctx, p);
   await ctx.reply('Confirmed - taking a backup first, then running ' + (p.cmds.length + (p.restarts || 0)) + ' action(s)...');
   const { backup, results } = await shell.runStaged(p);
   lastRaw = { ts: Date.now(), text: results.map((r) => '$ ' + r.cmd + ' (exit ' + r.code + ')\n' + r.out).join('\n---\n') };
@@ -255,6 +257,162 @@ export async function handlePendingAnswer(ctx, isYes) {
       setTimeout(() => shutdown(0), 3000);
     } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
   }
+  return true;
+}
+
+// ---- Pure questions: answer in plain English, never plan or stage --------
+function isInfoQuestion(goal) {
+  const g = goal.trim();
+  if (/^(can|could)\s+(u|you)\b/i.test(g) && g.length <= 140) return true;
+  if (/\?$/.test(g) && g.split(/\s+/).length <= 25) return true;
+  return /^(can|could|kya|will|would|does|do|is|are|what|how|why|when|which|who)\b/i.test(g) && g.split(/\s+/).length <= 12 && !/\b(download|install|update|delete|clean|remove|send|run|restart|create|make|schedule)\b/i.test(g);
+}
+async function runInfoAnswer(ctx, goal) {
+  try {
+    const a = await askAi('You are Jarvis, a WhatsApp bot. The owner asks a question ABOUT your abilities or status. Answer in 2-4 short plain-English sentences. Facts you can use: /agent can install npm packages and create new commands (owner asks, confirms with YES, self-tested before going live); /agent can update one package or all packages with backup + automatic rollback; downloads via /play /video /pinterest; bulk queues with cancel via "/agent cancel downloading"; junk cleanup via "/agent clean up junk". If the question is not about Jarvis, answer normally and briefly. Question: ' + goal);
+    return ctx.reply(String(a || 'I am not sure about that.').slice(0, 900));
+  } catch { return ctx.reply('I could not think that through right now - try again in a moment.'); }
+}
+
+// ---- Install a package + create a command (owner flow, YES-gated) --------
+function parseInstallGoal(goal) {
+  if (!/^\s*(install|add)\b/i.test(goal)) return null;
+  const m = goal.match(/\b(?:install|add)\s+(?:the\s+)?(?:npm\s+)?(?:package\s+)?(@?[a-z0-9][a-z0-9._\/-]*)/i);
+  if (!m) return null;
+  const pkg = m[1].replace(/\.+$/, '');
+  if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(pkg)) return null;
+  let cmdName = null;
+  const cm = goal.match(/\/?([a-z][a-z0-9]{1,20})\s+command/i) || goal.match(/command\s+(?:called|named)\s+\/?([a-z][a-z0-9]{1,20})/i);
+  if (cm) cmdName = cm[1].toLowerCase();
+  return { pkg, cmdName };
+}
+function parseUpdateGoal(goal) {
+  if (!/^\s*update\b/i.test(goal)) return null;
+  const m = goal.match(/^\s*update\s+(all|everything|@?[a-z0-9][a-z0-9._\/-]*)/i);
+  if (!m) return null;
+  const target = m[1].toLowerCase();
+  if (/^(all|everything)$/.test(target)) return { updateAll: true };
+  const pkg = m[1].replace(/\.+$/, '');
+  if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(pkg)) return null;
+  return { pkg };
+}
+async function runInstallFlow(ctx, goal) {
+  const parsed = parseInstallGoal(goal);
+  if (!parsed) return ctx.reply('Tell me the package, e.g. "/agent install mathjs make a calc command".');
+  const { pkg } = parsed;
+  await ctx.reply('Checking ' + pkg + ' on npm...');
+  const view = await shell.execShell('npm view ' + JSON.stringify(pkg) + ' version description --json', { timeoutMs: 45000 });
+  let meta = null;
+  try { meta = JSON.parse((view.out || '').trim().split('\n').pop()); } catch { /* not JSON */ }
+  if (view.code !== 0 || !meta?.version) return ctx.reply('I could not find the package "' + pkg + '" on npm. Check the exact name and try again.');
+  let cmdName = parsed.cmdName || pkg.replace(/^@[^/]+\//, '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 15);
+  if (registry.get(cmdName)) return ctx.reply('/' + cmdName + ' already exists - pick another command name, e.g. "/agent install ' + pkg + ' make a ' + cmdName + '2 command".');
+  await ctx.reply('Writing the /' + cmdName + ' command...');
+  let code = '';
+  try {
+    code = await askAi('Write a WhatsApp bot command module (ESM JavaScript) for a Baileys bot. Output ONLY the JavaScript file content - no markdown fences, no explanation.\nContract:\nexport default {\n  name: \'' + cmdName + '\',\n  aliases: [],\n  category: \'Tools\',\n  description: \'<one short line>\',\n  usage: \'' + cmdName + ' <input>\',\n  minArgs: 1,\n  async run(ctx) { ... }\n};\nInside run(ctx): ctx.args is the user\'s words as a string array; await ctx.reply(text) sends a plain reply; keep replies short, plain English. Use the npm package "' + pkg + '" and Node builtins only. NEVER read or print process.env, tokens, keys, .env, or files under auth/. On missing input reply with the usage line. Wrap work in try/catch and reply a short honest error.\nPackage: ' + pkg + ' (' + String(meta.description || '').slice(0, 200) + ')\nOwner request: ' + goal.slice(0, 300));
+  } catch (e) { return ctx.reply('I could not write the command code right now (' + (e?.message || 'error') + '). Nothing was installed.'); }
+  code = String(code || '').trim().replace(/^```(?:js|javascript)?\s*/i, '').replace(/```\s*$/, '').trim();
+  const problems = [];
+  if (!/export\s+default/.test(code)) problems.push('missing export default');
+  if (!new RegExp("name:\\s*['\"]" + cmdName + "['\"]").test(code)) problems.push('name mismatch');
+  if (!/async\s+run\s*\(/.test(code)) problems.push('missing async run');
+  if (/process\.env|auth\/|auth-backup|\.env\b|child_process|writeFileSync\s*\(\s*['\"][^'\"]*\.(env|key|pem)/.test(code)) problems.push('unsafe content');
+  if (problems.length) return ctx.reply('The generated /' + cmdName + ' code failed safety checks (' + problems.join(', ') + '). Nothing was installed - try again or rephrase.');
+  const tmpName = '_newcmd-' + cmdName + '.js';
+  const tmpFile = path.join('src', 'commands', tmpName);
+  fs.writeFileSync(tmpFile, code);
+  const chk = await shell.execShell('node --check ' + JSON.stringify(tmpFile), { timeoutMs: 30000 });
+  if (chk.code !== 0) { try { fs.unlinkSync(tmpFile); } catch {} return ctx.reply('The generated /' + cmdName + ' code has a syntax error. Nothing was installed - try again.'); }
+  shell.stage([], { kind: 'install', install: { pkg, version: meta.version, cmdName, tmpFile, finalFile: path.join('src', 'commands', cmdName + '.js') } });
+  shell.audit('INSTALL STAGED ' + pkg + '@' + meta.version + ' as /' + cmdName);
+  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). After a self-test passes, Jarvis restarts and /' + cmdName + ' is live.\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+}
+async function runInstallConfirmed(ctx, p) {
+  const { pkg, version, cmdName, tmpFile, finalFile } = p.install;
+  await ctx.reply('Confirmed - installing ' + pkg + ', self-testing /' + cmdName + ', then restarting...');
+  const inst = await shell.execShell('npm install ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 240000 });
+  shell.audit('INSTALL ' + pkg + ' -> exit ' + inst.code);
+  if (inst.code !== 0) { try { fs.unlinkSync(tmpFile); } catch {} return ctx.reply('npm install failed, nothing was added:\n' + String(inst.out || '').slice(-400)); }
+  try {
+    const mod = await import('./' + path.basename(tmpFile) + '?t=' + Date.now());
+    const cmd = mod.default;
+    if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
+    const replies = [];
+    const mockCtx = { args: ['2+2'], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: ctx.commands, sock: ctx.sock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
+    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
+    shell.audit('INSTALL self-test passed for /' + cmdName);
+  } catch (e) {
+    await shell.execShell('npm uninstall ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 180000 });
+    try { fs.unlinkSync(tmpFile); } catch {}
+    shell.audit('INSTALL self-test FAILED for /' + cmdName + ': ' + (e?.message || 'error') + ' - rolled back');
+    return ctx.reply('The new /' + cmdName + ' failed its self-test (' + String(e?.message || 'error').slice(0, 150) + '). Rolled back: package uninstalled, no command added. Jarvis keeps running as before.');
+  }
+  fs.renameSync(tmpFile, finalFile);
+  shell.audit('COMMAND ADDED /' + cmdName + ' (package ' + pkg + ')');
+  await ctx.reply('Installed ' + pkg + (version ? ' v' + version : '') + '. /' + cmdName + ' passed its self-test. Restarting Jarvis now - back in about a minute with /' + cmdName + ' live. (Rollback: "/agent remove the ' + cmdName + ' command".)');
+  try { const { shutdown } = await import('../connection/whatsapp.js'); setTimeout(() => shutdown(0), 3000); } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
+  return true;
+}
+async function runUpdateFlow(ctx, goal) {
+  const parsed = parseUpdateGoal(goal);
+  if (!parsed) return ctx.reply('Say "/agent update all" or "/agent update <package>".');
+  await ctx.reply('Checking for updates...');
+  const list = [];
+  if (parsed.updateAll) {
+    const r = await shell.execShell('npm outdated --json', { timeoutMs: 90000 });
+    let out = {};
+    try { out = JSON.parse((r.out || '').trim().split('\n{').length > 1 ? '{' + (r.out || '').trim().split('\n{').pop() : (r.out || '{}')); } catch { out = {}; }
+    for (const [name, info] of Object.entries(out)) {
+      if (!info?.current || !info?.latest) continue;
+      const major = String(info.current).split('.')[0] !== String(info.latest).split('.')[0];
+      list.push({ name, from: info.current, to: info.latest, major });
+    }
+    if (!list.length) return ctx.reply('Everything is already up to date.');
+  } else {
+    const inst = (() => { try { return JSON.parse(fs.readFileSync(path.join('node_modules', parsed.pkg, 'package.json'), 'utf8')).version; } catch { return null; } })();
+    const view = await shell.execShell('npm view ' + JSON.stringify(parsed.pkg) + ' version', { timeoutMs: 45000 });
+    const latest = (view.out || '').trim().split('\n').pop();
+    if (view.code !== 0 || !latest) return ctx.reply('Could not find the package "' + parsed.pkg + '" on npm.');
+    if (!inst) return ctx.reply(parsed.pkg + ' is not installed. Use "/agent install ' + parsed.pkg + ' ..." instead.');
+    if (inst === latest) return ctx.reply(parsed.pkg + ' is already at the latest version (' + latest + ').');
+    list.push({ name: parsed.pkg, from: inst, to: latest, major: inst.split('.')[0] !== latest.split('.')[0] });
+  }
+  const majors = list.filter((u) => u.major);
+  const baileys = list.some((u) => /baileys/i.test(u.name));
+  const shown = list.slice(0, 12).map((u) => '- ' + u.name + ' ' + u.from + ' -> ' + u.to + (u.major ? ' (MAJOR bump)' : ''));
+  if (list.length > 12) shown.push('- ...and ' + (list.length - 12) + ' more');
+  shell.stage([], { kind: 'update', install: { plan: list, updateAll: !!parsed.updateAll } });
+  shell.audit('UPDATE STAGED ' + list.length + ' package(s): ' + list.slice(0, 8).map((u) => u.name + '@' + u.to).join(', '));
+  return ctx.reply('Updates available (' + list.length + '):\n' + shown.join('\n') +
+    (majors.length ? '\n⚠️ Major version bump(s): ' + majors.map((u) => u.name).join(', ') + ' - higher risk of breakage.' : '') +
+    (baileys ? '\n⚠️ Baileys is in the list: Jarvis patches parts of it, so the post-update self-test matters extra here.' : '') +
+    '\nA backup of package.json + package-lock.json is taken first; if the self-test after restart fails, Jarvis rolls back automatically. Nothing is changed yet. Reply YES within 5 minutes to update, or NO to cancel.');
+}
+async function runUpdateConfirmed(ctx, p) {
+  const { plan, updateAll } = p.install;
+  const backupDir = path.join('data', 'ops-backup-pkg-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19));
+  await ctx.reply('Confirmed - backing up package files, then updating ' + plan.length + ' package(s)...');
+  const bk = await shell.execShell('mkdir -p ' + JSON.stringify(backupDir) + ' && cp package.json package-lock.json ' + JSON.stringify(backupDir) + '/', { timeoutMs: 30000 });
+  if (bk.code !== 0) return ctx.reply('Backup failed - refusing to update without a rollback path. Nothing was changed.');
+  const cmd = updateAll ? 'npm update --no-audit --no-fund' : plan.map((u) => 'npm install ' + JSON.stringify(u.name + '@' + u.to) + ' --no-audit --no-fund').join(' && ');
+  const r = await shell.execShell(cmd, { timeoutMs: 300000 });
+  shell.audit('UPDATE ran (' + plan.length + ' pkg) -> exit ' + r.code);
+  if (r.code !== 0) {
+    await shell.execShell('cp ' + JSON.stringify(backupDir) + '/package.json ' + JSON.stringify(backupDir) + '/package-lock.json . && npm ci --no-audit --no-fund', { timeoutMs: 300000 });
+    return ctx.reply('The update command failed; the backup was restored. Nothing changed.\n' + String(r.out || '').slice(-300));
+  }
+  const chk = await shell.execShell('npm ls ' + plan.slice(0, 3).map((u) => JSON.stringify(u.name)).join(' '), { timeoutMs: 60000 });
+  if (chk.code !== 0) {
+    await shell.execShell('cp ' + JSON.stringify(backupDir) + '/package.json ' + JSON.stringify(backupDir) + '/package-lock.json . && npm ci --no-audit --no-fund', { timeoutMs: 300000 });
+    return ctx.reply('The updated packages failed a consistency check; the backup was restored. Nothing changed.');
+  }
+  const desc = updateAll ? plan.length + ' packages updated' : plan.map((u) => u.name + ' ' + u.from + '->' + u.to).join(', ');
+  const { markPending } = await import('../utilities/updateguard.js');
+  markPending({ desc, backupDir });
+  shell.audit('UPDATE done, restarting for self-test: ' + desc);
+  await ctx.reply('Updated ' + desc + '. Restarting Jarvis for the post-update self-test - back in about a minute. If the self-test fails, the backup is restored automatically.');
+  try { const { shutdown } = await import('../connection/whatsapp.js'); setTimeout(() => shutdown(0), 3000); } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
   return true;
 }
 
@@ -682,7 +840,7 @@ async function runShellModeBody(ctx, goal, tid) {
   let text = finalNote || (bulkOnly ? results.map((r) => r.out).join('\n')
     : (results.length ? ((await summarize(rawForAi)) || fallbackSummary(results)) : 'Nothing to run for that.'));
 
-  if (stagedShells.length) {
+  if (stagedShells.length && (stagedShells.some((s) => s.sh) || restartsPlanned > 0) && !(results.length === 0 && stagedShells.length === 0)) {
     const stagedCmds = stagedShells.map((s) => s.sh);
     shell.stage(stagedCmds, { restarts: restartsPlanned });
     shell.audit('STAGED shells=' + JSON.stringify(stagedCmds).slice(0, 300) + ' restarts=' + restartsPlanned);
@@ -771,6 +929,9 @@ export default {
     }
     if (!ctx.isOwner && !allow(ctx.sender, 3)) return ctx.reply('Agent mode is taking a breather. Try again in a little while.');
     if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) {
+      if (/^\s*install\b/i.test(goal) || parseInstallGoal(goal)) return runInstallFlow(ctx, goal);
+      if (/^\s*update\b/i.test(goal)) return runUpdateFlow(ctx, goal);
+      if (isInfoQuestion(goal)) return runInfoAnswer(ctx, goal);
       if (isJunkCleanupGoal(goal)) return runJunkCleanup(ctx);
       if (isCancelDownloadGoal(goal)) {
         const r = agentqueue.cancelQueue();
