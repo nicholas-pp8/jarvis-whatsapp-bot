@@ -274,10 +274,35 @@ async function runInfoAnswer(ctx, goal) {
   } catch { return ctx.reply('I could not think that through right now - try again in a moment.'); }
 }
 
+// npm lookups go straight to the registry API - the npm CLI conflates network
+// errors with "not found" and its output gets mangled by output redaction.
+async function npmMeta(pkg) {
+  const enc = pkg.startsWith('@') ? pkg.replace('/', '%2f') : pkg;
+  try {
+    const r = await fetch('https://registry.npmjs.org/' + enc, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+    if (r.status === 404) return { exists: false };
+    if (!r.ok) return { exists: null, error: 'registry returned HTTP ' + r.status };
+    const j = await r.json();
+    const v = j?.['dist-tags']?.latest;
+    if (!v) return { exists: false };
+    const d = j?.versions?.[v]?.description || j?.description || '';
+    return { exists: true, version: String(v), description: String(d).slice(0, 200) };
+  } catch (e) { return { exists: null, error: String(e?.message || 'network error').slice(0, 120) }; }
+}
+async function npmSuggest(name) {
+  try {
+    const q = name.replace(/^@[^/]+\//, '').replace(/_+/g, '-');
+    const r = await fetch('https://registry.npmjs.org/-/v1/search?text=' + encodeURIComponent(q) + '&size=5', { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j?.objects || []).map((o) => ({ name: o?.package?.name, desc: String(o?.package?.description || '').slice(0, 80) })).filter((x) => x.name && x.name !== name).slice(0, 3);
+  } catch { return []; }
+}
+
 // ---- Install a package + create a command (owner flow, YES-gated) --------
 function parseInstallGoal(goal) {
-  if (!/^\s*(install|add)\b/i.test(goal)) return null;
-  const m = goal.match(/\b(?:install|add)\s+(?:the\s+)?(?:npm\s+)?(?:package\s+)?(@?[a-z0-9][a-z0-9._\/-]*)/i);
+  if (!/^\s*(install|add|npm\s+(i|install))\b/i.test(goal)) return null;
+  const m = goal.match(/\b(?:npm\s+(?:i|install)|install|add)\s+(?:the\s+)?(?:npm\s+)?(?:package\s+)?(@?[a-z0-9][a-z0-9._\/-]*)/i);
   if (!m) return null;
   const pkg = m[1].replace(/\.+$/, '');
   if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(pkg)) return null;
@@ -301,10 +326,13 @@ async function runInstallFlow(ctx, goal) {
   if (!parsed) return ctx.reply('Tell me the package, e.g. "/agent install mathjs make a calc command".');
   const { pkg } = parsed;
   await ctx.reply('Checking ' + pkg + ' on npm...');
-  const view = await shell.execShell('npm view ' + JSON.stringify(pkg) + ' version description --json', { timeoutMs: 45000 });
-  let meta = null;
-  try { meta = JSON.parse((view.out || '').trim().split('\n').pop()); } catch { /* not JSON */ }
-  if (view.code !== 0 || !meta?.version) return ctx.reply('I could not find the package "' + pkg + '" on npm. Check the exact name and try again.');
+  const meta = await npmMeta(pkg);
+  if (meta.exists === null) return ctx.reply('The npm registry could not be reached just now (' + (meta.error || 'network error') + '), so I cannot verify "' + pkg + '". Try again in a moment.');
+  if (!meta.exists) {
+    const sugg = await npmSuggest(pkg);
+    return ctx.reply('npm has no package called "' + pkg + '" (checked registry.npmjs.org directly).' +
+      (sugg.length ? '\nClosest real packages:\n' + sugg.map((s) => '- ' + s.name + (s.desc ? ': ' + s.desc : '')).join('\n') + '\nSay e.g. "/agent install ' + sugg[0].name + '" to use one.' : '\nNo close matches found either - double-check the name.'));
+  }
   let cmdName = parsed.cmdName || pkg.replace(/^@[^/]+\//, '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 15);
   if (registry.get(cmdName)) return ctx.reply('/' + cmdName + ' already exists - pick another command name, e.g. "/agent install ' + pkg + ' make a ' + cmdName + '2 command".');
   await ctx.reply('Writing the /' + cmdName + ' command...');
@@ -361,8 +389,9 @@ async function runUpdateFlow(ctx, goal) {
   const list = [];
   if (parsed.updateAll) {
     const r = await shell.execShell('npm outdated --json', { timeoutMs: 90000 });
-    let out = {};
-    try { out = JSON.parse((r.out || '').trim().split('\n{').length > 1 ? '{' + (r.out || '').trim().split('\n{').pop() : (r.out || '{}')); } catch { out = {}; }
+    let out = null;
+    try { out = JSON.parse((r.out || '').trim().split('\n{').length > 1 ? '{' + (r.out || '').trim().split('\n{').pop() : (r.out || '{}')); } catch { out = null; }
+    if (out === null) return ctx.reply('The update check failed (' + String(r.out || 'exit ' + r.code).slice(0, 150).replace(/\n/g, ' ') + '). Try again in a moment.');
     for (const [name, info] of Object.entries(out)) {
       if (!info?.current || !info?.latest) continue;
       const major = String(info.current).split('.')[0] !== String(info.latest).split('.')[0];
@@ -371,9 +400,10 @@ async function runUpdateFlow(ctx, goal) {
     if (!list.length) return ctx.reply('Everything is already up to date.');
   } else {
     const inst = (() => { try { return JSON.parse(fs.readFileSync(path.join('node_modules', parsed.pkg, 'package.json'), 'utf8')).version; } catch { return null; } })();
-    const view = await shell.execShell('npm view ' + JSON.stringify(parsed.pkg) + ' version', { timeoutMs: 45000 });
-    const latest = (view.out || '').trim().split('\n').pop();
-    if (view.code !== 0 || !latest) return ctx.reply('Could not find the package "' + parsed.pkg + '" on npm.');
+    const meta = await npmMeta(parsed.pkg);
+    if (meta.exists === null) return ctx.reply('The npm registry could not be reached just now (' + (meta.error || 'network error') + '), so I cannot check "' + parsed.pkg + '". Try again in a moment.');
+    if (!meta.exists) return ctx.reply('npm has no package called "' + parsed.pkg + '" (checked registry.npmjs.org directly).');
+    const latest = meta.version;
     if (!inst) return ctx.reply(parsed.pkg + ' is not installed. Use "/agent install ' + parsed.pkg + ' ..." instead.');
     if (inst === latest) return ctx.reply(parsed.pkg + ' is already at the latest version (' + latest + ').');
     list.push({ name: parsed.pkg, from: inst, to: latest, major: inst.split('.')[0] !== latest.split('.')[0] });
@@ -838,7 +868,7 @@ async function runShellModeBody(ctx, goal, tid) {
   const bulkOnly = results.length > 0 && results.every((r) => r.code === 0 && /^bulk \//.test(r.cmd));
   if (stagedShells.length && !finalNote) finalNote = '';
   let text = finalNote || (bulkOnly ? results.map((r) => r.out).join('\n')
-    : (results.length ? ((await summarize(rawForAi)) || fallbackSummary(results)) : 'Nothing to run for that.'));
+    : (results.length ? ((await summarize(rawForAi)) || fallbackSummary(results)) : (stagedShells.length ? 'Nothing has run yet.' : 'Nothing to run for that.')));
 
   if (stagedShells.length && (stagedShells.some((s) => s.sh) || restartsPlanned > 0) && !(results.length === 0 && stagedShells.length === 0)) {
     const stagedCmds = stagedShells.map((s) => s.sh);
