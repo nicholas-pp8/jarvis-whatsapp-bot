@@ -384,8 +384,9 @@ async function runInstallConfirmed(ctx, p) {
     const mod = await import('./' + path.basename(tmpFile) + '?t=' + Date.now());
     const cmd = mod.default;
     if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
+    if (cmd.minArgs !== 1) throw new Error('template minArgs changed');
     const replies = [];
-    const mockCtx = { args: ['2+2'], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: ctx.commands, sock: ctx.sock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
+    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: ctx.commands, sock: ctx.sock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
     await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
     shell.audit('INSTALL self-test passed for /' + cmdName);
   } catch (e) {
