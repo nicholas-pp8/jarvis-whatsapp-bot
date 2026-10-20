@@ -8,7 +8,7 @@ const fmtEta = (s) => {
   return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
 };
 
-export function renderProgress({ name, received, total, speed, kind, done }) {
+export function renderProgress({ name, received, total, speed, kind, done, bytes = 0, byteSpeed = 0, files = 0 }) {
   if (kind === 'task') {
     const pctT = total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null;
     const filledT = pctT === null ? 0 : Math.round(pctT / 5);
@@ -19,6 +19,8 @@ export function renderProgress({ name, received, total, speed, kind, done }) {
       `🪜 ${String(name || 'Planning...').slice(0, 80)}`,
       barT,
       `🔢 Steps: ${received}${total > 0 ? ` / ~${total}` : ''}`,
+      ...(bytes > 0 ? [`📦 Downloaded: ${formatBytes(bytes)}${files > 0 ? ` in ${files} file${files > 1 ? 's' : ''}` : ''}`] : []),
+      ...(bytes > 0 ? [`⚡ Speed: ${byteSpeed > 0 ? `${formatBytes(byteSpeed)}/s` : 'calculating...'}`] : []),
       `⏱️ ETA: ${etaT}`,
     ].join('\n');
   }
@@ -69,6 +71,9 @@ export function createProgressMessage(ctx, kind, intervalMs = 3000) {
     update(p = {}) {
       if (p.name) state.name = p.name;
       if (p.total !== undefined) state.total = p.total;
+      if (p.bytes !== undefined) state.bytes = p.bytes;
+      if (p.byteSpeed !== undefined) state.byteSpeed = p.byteSpeed;
+      if (p.files !== undefined) state.files = p.files;
       if (p.received !== undefined) {
         state.received = p.received;
         const secs = (Date.now() - start) / 1000;

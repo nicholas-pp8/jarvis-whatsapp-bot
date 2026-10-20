@@ -8,6 +8,7 @@ import config from '../config/config.js';
 import { registry } from '../handlers/commandHandler.js';
 import { createProgressMessage } from '../utils/progressBar.js';
 import { getSock } from './ownersock.js';
+import { formatBytes } from '../utils/helpers.js';
 import { audit } from './ownershell.js';
 
 const FILE = path.join('data', 'agent-queue.json');
@@ -75,19 +76,48 @@ async function processQueue() {
     const sock = getSock();
     if (!sock) { initAgentQueue(); return; }
     const own = String(config.ownerNumber).replace(/\D/g, '');
+    const qStart = Date.now();
+    let currentItem = null;
+    // Wrap the socket to measure real media bytes as files are delivered.
+    const meter = Object.create(sock);
+    meter.sendMessage = async (j, content, opts) => {
+      try {
+        const m = content?.audio || content?.video || content?.image || content?.document;
+        if (m) {
+          let n = 0;
+          if (Buffer.isBuffer(m)) n = m.length;
+          else if (m.url && !/^https?:/i.test(String(m.url))) { try { n = (await fs.promises.stat(String(m.url))).size; } catch { /* unmeasurable */ } }
+          if (n > 0) {
+            const cur = load();
+            if (cur) { cur.bytes = (cur.bytes || 0) + n; save(cur); }
+            try {
+              prog.update({
+                name: ((currentItem?.args || 'file').slice(0, 50)) + ' (' + formatBytes(n) + ')',
+                bytes: (cur?.bytes || n), files: (cur?.done || 0) + 1,
+                byteSpeed: (cur?.bytes || n) / Math.max(1, (Date.now() - qStart) / 1000),
+              });
+            } catch { /* best effort */ }
+          }
+        }
+      } catch { /* metering is best effort */ }
+      return sock.sendMessage(j, content, opts);
+    };
     const ctx = {
-      sock, jid: q.jid,
+      sock: meter, jid: q.jid,
       sender: own, senderJid: own + '@s.whatsapp.net',
-      isOwner: true, isGroup: q.jid.endsWith('@g.us'), msg: { message: {} },
+      isOwner: true, isGroup: q.jid.endsWith('@g.us'),
+      msg: { key: { remoteJid: q.jid, fromMe: false, id: 'AGENTQUEUE' + Date.now() }, message: { conversation: '/agent ' + String(q.goal || '') } },
+      text: '', commands: registry,
       args: [], reply: (t, o) => sock.sendMessage(q.jid, { text: t, ...(o || {}) }),
     };
-    const prog = createProgressMessage(ctx, 'task', 15000);
+    const prog = createProgressMessage(ctx, 'task', 8000);
     await prog.begin();
     while (true) {
       q = load() || q;
       const total = q.items.length;
       const item = q.items.find((i) => i.status === 'pending');
       if (!item) break;
+      currentItem = item;
       let ok = false;
       for (let attempt = 1; attempt <= 2 && !ok; attempt++) {
         item.attempts = attempt; save(q);
@@ -114,7 +144,7 @@ async function processQueue() {
     q.finishedAt = Date.now(); save(q);
     const total = q.items.length;
     const failedNames = q.items.filter((i) => i.status === 'failed').map((i) => i.args);
-    const summary = '📦 Bulk delivery finished: ' + (q.done || 0) + ' of ' + total + ' delivered.' +
+    const summary = '📦 Bulk delivery finished: ' + (q.done || 0) + ' of ' + total + ' delivered' + (q.bytes ? ' (' + formatBytes(q.bytes) + ' total)' : '') + '.' +
       (failedNames.length ? '\nCould not get ' + failedNames.length + ': ' + failedNames.join(', ').slice(0, 400) + '\nSay "/agent retry" and I will try the failed ones again.' : '');
     try { await prog.text(summary); } catch { await ctx.reply(summary); }
     audit('QUEUE DONE ' + (q.done || 0) + '/' + total + ' failed=' + (q.failed || 0));

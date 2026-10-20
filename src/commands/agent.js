@@ -22,7 +22,7 @@ import path from 'node:path';
 import cron from 'node-cron';
 
 const SAFE = ['weather', 'news', 'ask', 'define', 'translate', 'wiki', 'time', 'stock', 'quote', 'lyrics'];
-const MAX_STEPS = 5, MAX_GOAL = 300, MAX_ARG = 120, SH_STEPS = 10, SH_EXEC_CAP = 25;
+const MAX_STEPS = 5, MAX_GOAL = 300, MAX_ARG = 120, SH_STEPS = 15, SH_EXEC_CAP = 100;
 
 function resolveCmd(name) {
   const direct = registry.get(name);
@@ -94,7 +94,7 @@ function parseShellPlan(raw) {
       if (s?.bulk) {
         const cmd = String(s.bulk.cmd || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         const items = (Array.isArray(s.bulk.items) ? s.bulk.items : [])
-          .map((i) => String(i).slice(0, MAX_ARG).replace(/[\r\n]/g, ' ').trim()).filter(Boolean).slice(0, 25);
+          .map((i) => String(i).slice(0, MAX_ARG).replace(/[\r\n]/g, ' ').trim()).filter(Boolean);
         if (!cmd || items.length < 2) return null;
         steps.push({ type: 'bulk', cmd, items });
         continue;
@@ -220,7 +220,9 @@ function scheduleOne(entry) {
     shell.audit('SCHEDULE FIRED id=' + entry.id + ' goal="' + entry.goal.slice(0, 120) + '"');
     const ctx = {
       sock: s, jid: ownerDM(), sender: String(config.ownerNumber).replace(/\D/g, ''),
-      senderJid: ownerDM(), isOwner: true, isGroup: false, msg: { message: {} },
+      senderJid: ownerDM(), isOwner: true, isGroup: false,
+      msg: { key: { remoteJid: ownerDM(), fromMe: false, id: 'AGENTSCHED' + Date.now() }, message: { conversation: '/agent ' + entry.goal } },
+      text: entry.goal, commands: registry,
       args: entry.goal.split(/\s+/),
       reply: (t, o) => s.sendMessage(ownerDM(), { text: t, ...(o || {}) }),
     };
@@ -283,7 +285,9 @@ function initTaskResume() {
         const ownNum = own.replace('@s.whatsapp.net', '');
         const ctx = {
           sock: s, jid: own, sender: ownNum, senderJid: own,
-          isOwner: true, isGroup: false, msg: { message: {} },
+          isOwner: true, isGroup: false,
+          msg: { key: { remoteJid: own, fromMe: false, id: 'AGENTRESUME' + Date.now() }, message: { conversation: '/agent ' + task.goal } },
+          text: task.goal, commands: registry,
           args: task.goal.split(/\s+/),
           reply: (txt, o) => s.sendMessage(own, { text: txt, ...(o || {}) }),
         };
@@ -375,11 +379,14 @@ async function planRound(goal, transcript, jarvisCmds) {
       'Examples:\n' +
       '- "love" -> [{"ask":"Love what - a love quote, a romantic song, shayari?"}]\n' +
       '- "download arijit singh love songs" -> [{"bulk":{"cmd":"play","items":["Tum Hi Ho","Channa Mereya","Agar Tum Saath Ho","Raabta","Ae Dil Hai Mushkil"]}}]\n' +
+      '- "download 20 couple memes from pinterest" -> [{"bulk":{"cmd":"pinterest","items":["album couple meme","album funny couple meme","album couple meme hindi","album cute couple meme","album couple meme quotes","album desi couple meme","album couple meme love"]}}] - for Pinterest use "album <query>" args (3 pins each) and vary the queries to reach the count.\n' +
       '- "how much ram is free" -> [{"sh":"free -m"}]\n' +
       '- "every night 2am cleanup" -> [{"schedule":{"cron":"0 2 * * *","goal":"clean old logs and temp files"}}]\n' +
       'For a single "download/play a song" goal, use one play command step. No other text.' + history,
       { allowKeyless: true, temperature: 0.1, prefer: 'groq' });
-    return parseShellPlan(r?.text || r);
+    const parsed = parseShellPlan(r?.text || r);
+    if (!parsed) logger.warn('[agent] plan parse failed, raw: ' + String(r?.text || r || '').replace(/\s+/g, ' ').slice(0, 400));
+    return parsed;
   } catch (e) {
     logger.warn('[agent] planner failed: ' + (e?.message || 'error'));
     return null;
@@ -503,7 +510,7 @@ async function runShellModeBody(ctx, goal, tid) {
 
   const goalNumbers = (goal.match(/\+?[0-9][0-9\s-]{6,16}[0-9]/g) || []).map((s) => s.replace(/\D/g, ''));
   const ownNumber = String(config.ownerNumber).replace(/\D/g, '');
-  for (let round = 1; round <= 6 && executed < SH_EXEC_CAP; round++) {
+  for (let round = 1; round <= 10 && executed < SH_EXEC_CAP; round++) {
     let plan = null;
     try {
       plan = await planRound(goal, transcript, jarvisCmds);
@@ -511,6 +518,10 @@ async function runShellModeBody(ctx, goal, tid) {
       logger.warn('[agent] round ' + round + ' crashed: ' + (e?.stack || e?.message || 'error'));
       if (round === 1) finalNote = 'Something went wrong while planning. Try again in a moment.';
       break;
+    }
+    if (!plan && round === 1) {
+      await new Promise((r) => setTimeout(r, 15000));
+      try { plan = await planRound(goal, transcript, jarvisCmds); } catch { plan = null; }
     }
     if (!plan) { if (round === 1) finalNote = 'I could not plan that safely. Try rephrasing the instruction.'; break; }
     if (plan.refuse) { finalNote = 'I can\'t do that: ' + plan.refuse; break; }
@@ -669,7 +680,7 @@ export default {
       if (um) return runUnschedule(ctx, um[1]);
       if (/^(schedules|list schedules)$/i.test(goal)) return runListSchedules(ctx);
     }
-    if (!allow(ctx.sender, ctx.isOwner ? 120 : 3)) return ctx.reply('Agent mode is taking a breather. Try again in a little while.');
+    if (!ctx.isOwner && !allow(ctx.sender, 3)) return ctx.reply('Agent mode is taking a breather. Try again in a little while.');
     if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) return runShellMode(ctx, goal);
     return runSafeMode(ctx, goal);
   },
