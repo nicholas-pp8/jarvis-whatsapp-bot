@@ -388,6 +388,21 @@ async function probeExports(pkg) {
   const r = await shell.execShell('node --input-type=module -e "' + script + '" ' + JSON.stringify(pkg), { timeoutMs: 60000 });
   try { return JSON.parse((r.out || '').trim().split('\n').pop()); } catch { return {}; }
 }
+/** Plain-English effects of a generated body, for informed owner approval.
+ *  Deterministic extraction only - recipients, external hosts, disk writes, multi-turn. */
+export function effectsSummary(body) {
+  const b = String(body || '');
+  const hosts = [...b.matchAll(/https:\/\/([\w.-]+)/g)].map((m) => m[1]).filter((h, i, a) => a.indexOf(h) === i).slice(0, 4);
+  const writesData = /writeFileSync|appendFileSync|createWriteStream/.test(b) && /data[\/'"]/.test(b);
+  const media = /sendMessage\(ctx\.jid/.test(b);
+  const multi = /sessions\.js|S\.begin\(/.test(b);
+  const effects = ['replies only in the chat that calls it' + (media ? ' (can include media)' : '')];
+  effects.push(hosts.length ? 'contacts ' + hosts.join(', ') + ' over https' : 'makes no external network calls');
+  effects.push(writesData ? 'stores small files in its own data/ folder' : 'writes nothing to disk');
+  if (multi) effects.push('while active it reads the next plain messages in that chat (multi-turn)');
+  return effects.join('; ') + '.';
+}
+
 export function bodyProblem(b) {
   if (!b) return 'the AI returned nothing';
   if (/export\s+default|module\.exports/.test(b)) return 'it included export statements (inner statements only, no exports)';
@@ -1188,7 +1203,7 @@ export async function repairWatchTick() {
       const r = await repairCommand(f.cmd, f.err, { apply: false });
       if (r.ok) {
         shell.stage([], { kind: 'repaircmd', repaircmd: { name: f.cmd, body: r.body } });
-        await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair PREPARED for /' + f.cmd + ' (was failing: "' + f.err.slice(0, 100) + '"). The fix passed the safety scan and load test, but I will not apply it without your OK. Reply YES within 5 minutes to apply it, or NO to discard. I will not auto-prepare another fix for this command today.' }).catch(() => {});
+        await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair PREPARED for /' + f.cmd + ' (was failing: "' + f.err.slice(0, 100) + '").\nWhat the fixed command does when used: ' + effectsSummary(r.body) + '\nThe fix is AI-written; it passed the safety scan and load test (heuristic checks, not a proof), and any external service it uses can still fail. Reply YES within 5 minutes to apply it, or NO to discard. I will not auto-prepare another fix for this command today.' }).catch(() => {});
       } else {
         await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair: /' + f.cmd + ' failed but I could not fix it automatically (' + r.why.slice(0, 150) + '). Original error: ' + f.err.slice(0, 100) }).catch(() => {});
       }
@@ -1458,7 +1473,7 @@ async function runBuilderFlow(ctx, goal) {
     }
     shell.stage([], { kind: 'template', template: { key: tpl.key, cmdName: name, desc: tpl.desc, usage: tpl.usage || '<input>', minArgs: tpl.minArgs ?? 1 } });
     shell.audit('TEMPLATE STAGED ' + tpl.key + ' as /' + name);
-    return ctx.reply('Plan: add /' + name + ' from a pre-tested template (' + tpl.desc + '). No AI code writing needed for this one. Reply YES within 5 minutes to add it, or NO to cancel.');
+    return ctx.reply('Plan: add /' + name + ' from a pre-tested template (' + tpl.desc + '). No AI code writing needed for this one.\nWhat it does when used: ' + effectsSummary(tpl.body) + '\nReply YES within 5 minutes to add it, or NO to cancel.');
   }
   // 2) LLM maps the requirement to a real package or a keyless free API
   const r = await ai('A WhatsApp bot owner wants a new command: "' + goal.slice(0, 200) + '".\nDecide the implementation. Reply with ONLY JSON:\n{"package":"<one real npm package name>","cmdName":"<3-15 lowercase letters>"} if an npm package fits best,\n{"api":"<one keyless free https GET endpoint>","cmdName":"<3-15 lowercase letters>","how":"<one line>"} if a keyless free public API fits best,\n{"unknown":"<one line why>"} if it needs a paid/keyed service or you are not sure. Never invent package names or URLs.', { temperature: 0.2 }, 'builder');
@@ -1489,7 +1504,7 @@ async function runBuilderFlow(ctx, goal) {
     if (!probe.ok) return ctx.reply('The free API I found for that (' + url.slice(0, 80) + ') is not responding (' + probe.status + '). Not building on a dead source - try again later or name another API.');
     shell.stage([], { kind: 'apicmd', apicmd: { url, cmdName: name, how: String(spec.how || goal).slice(0, 150), goal: goal.slice(0, 200) } });
     shell.audit('APICMD STAGED ' + url.slice(0, 80) + ' as /' + name);
-    return ctx.reply('Plan: build /' + name + ' on the free keyless API ' + url.slice(0, 100) + ' (reachable right now). Code is AI-written, then safety-scanned and load-tested before going live. Reply YES within 5 minutes, or NO to cancel.');
+    return ctx.reply('Plan: build /' + name + ' on the free keyless API ' + url.slice(0, 100) + ' (reachable right now). Code is AI-written after your YES, then safety-scanned and load-tested before going live. By rule it can only reply in the chat that calls it, use https, and write only to data/ or /tmp; the scan enforcing that is heuristic, not a proof. Reply YES within 5 minutes, or NO to cancel.');
   }
   return ctx.reply('I could not plan that command. Try naming the npm package directly, e.g. "/agent install <package>".');
 }
