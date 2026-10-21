@@ -14,11 +14,12 @@ const QUALITIES = [144, 360, 480, 720, 1080];
 
 // The converter service occasionally returns the WRONG video for a correct URL (observed
 // in production testing). Verify its metadata title against YouTube's oEmbed before using it.
-async function expectedTitle(cleanUrl) {
+export async function expectedTitle(cleanUrl) {
   try {
-    const r = await fetch('https://www.youtube.com/oembed?url=' + encodeURIComponent(cleanUrl) + '&format=json', { signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return null;
-    const j = await r.json();
+    // Guarded fetch instead of raw fetch: validated + pinned destination, capped body.
+    const r = await fetchPublic('https://www.youtube.com/oembed?url=' + encodeURIComponent(cleanUrl) + '&format=json', { maxBytes: 64 * 1024, timeoutMs: 10000 });
+    if (r.status < 200 || r.status >= 300) return null;
+    const j = JSON.parse(r.body.toString('utf8'));
     return typeof j?.title === 'string' ? j.title : null;
   } catch { return null; } // verification unavailable -> allow (service is usually right)
 }

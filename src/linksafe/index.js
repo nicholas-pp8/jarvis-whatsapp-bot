@@ -1,4 +1,4 @@
-import { requestPublic } from '../utilities/validation.js';
+import { requestPublic, fetchPublic } from '../utilities/validation.js';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 const SHORT = new Set(['bit.ly','tinyurl.com','t.co','goo.gl','is.gd','cutt.ly','rb.gy','ow.ly','shorturl.at','tiny.cc','buff.ly','rebrand.ly']);
@@ -40,9 +40,11 @@ async function refreshFeeds() {
     const s = new Set();
     for (const f of ['https://urlhaus.abuse.ch/downloads/text_online/', 'https://openphish.com/feed.txt']) {
       try {
-        const r = await fetch(f, { redirect: 'follow', signal: AbortSignal.timeout(15000), headers: { 'user-agent': 'Mozilla/5.0' } });
-        if (!r.ok) continue;
-        for (const l of (await r.text()).split('\n')) { const x = l.trim(); if (x.startsWith('http') && s.size < 120000) s.add(x.replace(/\/$/, '').toLowerCase()); }
+        // Guarded fetch: DNS validated + pinned, redirect hops revalidated, body capped. Raw fetch with
+        // unvalidated redirect:follow could be pointed at internal addresses by a compromised feed host.
+        const r = await fetchPublic(f, { maxBytes: 16 * 1024 * 1024, timeoutMs: 15000, headers: { 'user-agent': 'Mozilla/5.0' } });
+        if (r.status < 200 || r.status >= 300) continue;
+        for (const l of r.body.toString('utf8').split('\n')) { const x = l.trim(); if (x.startsWith('http') && s.size < 120000) s.add(x.replace(/\/$/, '').toLowerCase()); }
       } catch { /* feed down */ }
     }
     if (s.size) { feeds.set = s; }

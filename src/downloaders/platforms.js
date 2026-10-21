@@ -103,9 +103,14 @@ export function isPrivateIp(ip) {
   return p[0] === 10 || p[0] === 127 || p[0] === 0 || (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127) || p[0] >= 224;
 }
 
+// oEmbed helper fetches now go through the shared guard: DNS validated + pinned, redirect hops
+// revalidated, body capped. The base hosts are code constants, but a constant host alone is not
+// destination validation - a raw fetch follows redirects and trusts DNS without pinning.
 async function timedFetch(u, init = {}, ms = 15000) {
-  const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
-  try { return await fetch(u, { ...init, signal: c.signal }); } catch (e) { throw new Error(e.name === 'AbortError' ? 'timeout' : e.message); } finally { clearTimeout(t); }
+  try {
+    const r = await fetchPublic(u, { maxBytes: 256 * 1024, timeoutMs: ms, headers: init.headers || {} });
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => JSON.parse(r.body.toString('utf8')) };
+  } catch (e) { throw new Error(/timed out/i.test(e.message) ? 'timeout' : e.message); }
 }
 
 export function parseMeta(html) {
@@ -143,7 +148,7 @@ export async function pageMeta(url, { fetchImpl } = {}) {
   throw new Error(last);
 }
 
-async function oembedMeta(base, url) {
+export async function oembedMeta(base, url) {
   const r = await timedFetch(base + encodeURIComponent(url), { headers: { 'user-agent': UAS[0], accept: 'application/json' } }, 12000);
   if (!r.ok) throw new Error('oembed HTTP ' + r.status);
   const j = await r.json(); const img = j.url && /^image|photo/.test(j.type || 'photo') ? j.url : j.thumbnail_url;
