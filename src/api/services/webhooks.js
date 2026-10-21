@@ -8,6 +8,7 @@ import config from '../../config/config.js';
 import {bus} from '../events/bus.js';
 import {badRequest} from '../errors.js';
 import {log} from '../logger.js';
+import {requestPublic} from '../../utilities/validation.js';
 
 export const EVENT_TYPES = ['connection.changed', 'session.revoked', 'bot.restart', 'plugin.changed', 'webhook.test'];
 const file = () => path.join(config.paths.data, 'api-webhooks.json');
@@ -44,12 +45,16 @@ export function remove(id) { const l = load(); const n = l.filter((w) => w.id !=
 
 const DELAYS = [5000, 30000, 300000];
 export class Dispatcher {
-  constructor({fetchFn = globalThis.fetch, delays = DELAYS, lookup = dns.lookup, now = () => Date.now()} = {}) { this.fetchFn = fetchFn; this.delays = delays; this.lookup = lookup; this.now = now; this.queued = 0; this.timers = new Set(); }
+  // Delivery goes through requestPublic: the URL is re-validated and the connection is PINNED to the
+  // validated address, so DNS cannot rebind between the check and the actual request. follow:false
+  // (redirects are never followed for webhooks). requestFn is injectable for tests.
+  constructor({requestFn = requestPublic, delays = DELAYS, lookup = dns.lookup, now = () => Date.now()} = {}) { this.requestFn = requestFn; this.delays = delays; this.lookup = lookup; this.now = now; this.queued = 0; this.timers = new Set(); }
   async deliver(w, event, attempt = 0) {
     const body = JSON.stringify({id: crypto.randomBytes(6).toString('hex'), type: event.type, at: event.at, data: event.data}); const ts = String(Math.floor(this.now() / 1000));
     try {
-      await checkUrl(w.url, this.lookup); // re-check at send time (DNS rebinding)
-      const r = await this.fetchFn(w.url, {method: 'POST', redirect: 'manual', headers: {'content-type': 'application/json', 'x-jarvis-event': event.type, 'x-jarvis-timestamp': ts, 'x-jarvis-signature': sign(w.secret, ts, body)}, body, signal: AbortSignal.timeout(5000)});
+      await checkUrl(w.url, this.lookup); // policy gate: https only, no credentials, no private targets
+      const r = await this.requestFn(w.url, {method: 'POST', follow: false, timeoutMs: 5000, headers: {'content-type': 'application/json', 'x-jarvis-event': event.type, 'x-jarvis-timestamp': ts, 'x-jarvis-signature': sign(w.secret, ts, body)}, body});
+      r.stream?.resume?.(); // free the socket; only the status matters
       if (r.status >= 200 && r.status < 300) return true;
       throw new Error('status ' + r.status);
     } catch (e) {

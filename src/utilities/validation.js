@@ -12,30 +12,33 @@ import https from 'node:https';
  *  re-validated with publicURL (http/https, ports 80/443, no credentials, all
  *  resolved IPs public) and the connection is pinned to a validated address,
  *  so a public-looking URL cannot redirect or rebind into private/internal
- *  targets. Returns { status, headers, stream, finalUrl }; the caller must
- *  consume or destroy the stream. With follow:false, redirect responses are
- *  returned to the caller (stream already drained) instead of followed. */
-export async function requestPublic(text, { method = 'GET', timeoutMs = 20000, headers = {}, depth = 0, follow = true } = {}) {
+ *  targets. `body` (string/Buffer) sends a request body (content-length set
+ *  automatically). Returns { status, headers, stream, finalUrl }; the caller
+ *  must consume or destroy the stream. With follow:false, redirect responses
+ *  are returned to the caller (stream already drained) instead of followed. */
+export async function requestPublic(text, { method = 'GET', timeoutMs = 20000, headers = {}, body, depth = 0, follow = true } = {}) {
   if (depth > 3) throw new Error('Too many redirects');
   const u = await publicURL(text);
   const host = u.hostname.replace(/^\[|\]$/g, '');
   const records = net.isIP(host) ? [{ address: host, family: net.isIP(host) }] : await dns.lookup(host, { all: true });
   if (!records.length || records.some((x) => privateIP(x.address))) throw new Error('That address is not allowed (private or unreachable).');
   const chosen = records.find((x) => x.family === 4) || records[0];
+  const hdrs = { 'Accept-Encoding': 'identity', ...headers };
+  if (body != null && !Object.keys(hdrs).some((k) => k.toLowerCase() === 'content-length')) hdrs['content-length'] = Buffer.byteLength(body);
   const res = await new Promise((ok, no) => {
     const req = (u.protocol === 'https:' ? https : http).request(u, {
       method,
-      headers: { 'Accept-Encoding': 'identity', ...headers },
+      headers: hdrs,
       lookup: (_h, opts, cb) => cb(null, opts.all ? [chosen] : chosen.address, chosen.family),
     }, (r) => ok(r));
     req.setTimeout(timeoutMs, () => req.destroy(new Error('Request timed out')));
     req.on('error', no);
-    req.end();
+    req.end(body);
   });
   if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
     res.resume();
     if (!follow) return { status: res.statusCode, headers: res.headers, stream: null, finalUrl: u.href };
-    return requestPublic(new URL(res.headers.location, u).href, { method, timeoutMs, headers, depth: depth + 1, follow });
+    return requestPublic(new URL(res.headers.location, u).href, { method, timeoutMs, headers, body, depth: depth + 1, follow });
   }
   return { status: res.statusCode, headers: res.headers, stream: res, finalUrl: u.href };
 }
