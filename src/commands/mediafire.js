@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { featOn } from '../config/features.js';
-import { fetchPublic } from '../utilities/validation.js';
+import { fetchPublic, safeName } from '../utilities/validation.js';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -28,7 +28,7 @@ export default {
       const dm = html.match(/id="downloadButton"[^>]*href="([^"]+)"/) || html.match(/href="(https?:\/\/download\d+\.mediafire\.com\/[^"]+)"/);
       if (!dm) return ctx.reply('⚠️ Could not find the file on that page (folder links and expired files are not supported).');
       const direct = dm[1];
-      const name = decodeURIComponent(direct.split('/').pop().split('?')[0] || 'mediafire-file').slice(0, 80);
+      const name = safeName(direct.split('/').pop().split('?')[0], 'mediafire-file');
       const r = await fetchPublic(direct, { maxBytes: MAX_BYTES + 1, timeoutMs: 120000 });
       if (r.status !== 200) return ctx.reply('⚠️ The file would not download.');
       const bytes = r.body.length;
