@@ -45,17 +45,52 @@ import { suggest } from '../utils/suggest.js';
 import { record as recordHistory } from '../utils/history.js';
 import { lookup as customReply } from '../custom/index.js';
 export const commandLoadFailures=[];
+export const quarantinedGenerated=[];
 export const registry = new CommandRegistry();
 
-/** Loads every command module in src/commands automatically (skips files starting with "_"). */
+const GENERATED_PREFIX = "import { logFailure } from '../utils/genregistry.js';";
+
+/** Loads every command module in src/commands automatically (skips files starting with "_").
+ *  Generated files are identified two ways (an edited file cannot bypass by
+ *  stripping the marker): the data/generated-commands.json registry OR the
+ *  /agent wrapper import prefix. Both must pass a structural gate BEFORE import:
+ *  wrapper-shaped files the exact-shape check, other registry files a relaxed
+ *  "declarations only at import" check. If the parser itself is unavailable,
+ *  generated files are NOT loaded (fail closed); builtins are never gated. */
 export async function loadCommands() {
+  let gate = null;
+  try { gate = await import('../utils/genstruct.js'); } catch (e) { logger.error('Structural gate unavailable (parser missing?): ' + (e?.message || 'error') + ' - generated commands will NOT load (fail closed)'); }
+  let generatedNames = new Set();
+  try {
+    const { loadGenerated } = await import('../utils/genregistry.js');
+    generatedNames = new Set(loadGenerated().map((x) => x && x.name).filter(Boolean));
+  } catch { /* no registry readable - prefix detection still applies */ }
   for (const f of (await fs.readdir(dir)).sort()) {
     if (!f.endsWith('.js') || f.startsWith('_')) continue;
+    const cname = f.replace(/\.js$/, '');
     try {
+      const head = await fs.readFile(path.join(dir, f), 'utf8');
+      const wrapperShaped = head.startsWith(GENERATED_PREFIX);
+      const isGenerated = generatedNames.has(cname) || wrapperShaped;
+      if (isGenerated) {
+        if (!gate) {
+          quarantinedGenerated.push(cname);
+          commandLoadFailures.push(cname);
+          logger.error(`QUARANTINED generated command ${f}: structural gate unavailable. Not loaded (fail closed).`);
+          continue;
+        }
+        const v = wrapperShaped ? gate.validateGeneratedSource(head) : gate.validateGeneratedLoose(head);
+        if (!v.ok) {
+          quarantinedGenerated.push(cname);
+          commandLoadFailures.push(cname);
+          logger.error(`QUARANTINED generated command ${f}: structural gate failed (${v.why}). Not loaded. Inspect with "/agent history".`);
+          continue;
+        }
+      }
       const mod = await import(pathToFileURL(path.join(dir, f)).href);
       registry.register(mod.default);
     } catch (err) {
-      commandLoadFailures.push(f.replace(/\.js$/,''));
+      commandLoadFailures.push(cname);
       logger.error(`Failed to load command file ${f}:`, err);
     }
   }

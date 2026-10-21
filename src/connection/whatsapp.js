@@ -260,6 +260,10 @@ export async function startWhatsApp() {
           onConnected({ registry: reg2, commandLoadFailures: clf2 }).then((verdict) => {
             if (verdict && config.ownerNumber) s.sendMessage(config.ownerNumber.replace(/\D/g, '') + '@s.whatsapp.net', { text: verdict }).catch(() => {});
           }).catch(() => {});
+          const { quarantinedGenerated: qg } = await import('../handlers/commandHandler.js');
+          if (qg && qg.length && config.ownerNumber) {
+            s.sendMessage(config.ownerNumber.replace(/\D/g, '') + '@s.whatsapp.net', { text: '🛡️ Security gate: ' + qg.length + ' generated command(s) FAILED the structural check and were NOT loaded: ' + qg.map((n) => '/' + n).join(', ') + '. Their files are untouched on disk. Inspect with "/agent history ' + qg[0] + '" or remove with "/agent remove the ' + qg[0] + ' command". Nothing else was affected.' }).catch(() => {});
+          }
         } catch {}
         writeState('connected', { code: null });
         startAutobio(s);

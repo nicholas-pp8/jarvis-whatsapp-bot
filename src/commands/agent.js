@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import cron from 'node-cron';
 import { loadGenerated, saveGenerated, noteGenerated, dropGenerated, getGenerated, archiveVersion, listVersions, versionPath, logFailure, readFailures, buildCommandFile } from '../utils/genregistry.js';
+import { validateGeneratedSource } from '../utils/genstruct.js';
 import { pickTemplate } from '../utils/templates.js';
 import { buildKit, unpackKit } from '../utils/recovery.js';
 import * as sessions from '../utils/sessions.js';
@@ -661,6 +662,8 @@ async function runInstallConfirmed(ctx, p) {
     const prob = bodyProblem(body);
     if (prob) { lastFail = prob; shell.audit('CODEGEN attempt ' + attempt + ' rejected: ' + prob); continue; }
     const candidate = buildCommandFile(cmdName, { desc: (desc || pkg + ' helper').slice(0, 90), usage: '<input>', minArgs: 1, body });
+    const gv = validateGeneratedSource(candidate, body);
+    if (!gv.ok) { lastFail = 'structural gate: ' + gv.why; shell.audit('CODEGEN attempt ' + attempt + ' structural rejection: ' + gv.why); continue; }
     const chkFile = path.join('src', 'commands', '_chk-' + cmdName + '.mjs');
     try { fs.writeFileSync(chkFile, candidate); } catch { lastFail = 'could not stage a temp file'; continue; }
     const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
@@ -1322,6 +1325,8 @@ export async function repairCommand(name, errMsg, { apply = true } = {}) {
   }
   if (!body) return { ok: false, why: 'could not generate a fix (' + lastFail.slice(0, 100) + ')' };
   const candidate = buildCommandFile(name, { desc: (entry.pkg || name) + ' helper', usage: entry.usage || '<input>', minArgs: entry.minArgs ?? 1, body });
+  const gv2 = validateGeneratedSource(candidate, body);
+  if (!gv2.ok) return { ok: false, why: 'the fix failed the structural gate (' + gv2.why.slice(0, 80) + ')' };
   const chkFile = path.join('src', 'commands', '_chk-repair-' + name + '.mjs');
   try {
     fs.writeFileSync(chkFile, candidate);
@@ -1353,6 +1358,8 @@ export async function runRepairConfirmed(ctx, p) {
   if (!entry) return ctx.reply('That prepared repair is no longer valid (the command is gone) - nothing was applied.');
   if (bodyProblem(body)) return ctx.reply('The prepared fix no longer passes the safety scan - nothing was applied.');
   const candidate = buildCommandFile(name, { desc: (entry.pkg || name) + ' helper', usage: entry.usage || '<input>', minArgs: entry.minArgs ?? 1, body });
+  const gv3 = validateGeneratedSource(candidate, body);
+  if (!gv3.ok) return ctx.reply('The prepared fix no longer passes the structural gate (' + gv3.why.slice(0, 80) + ') - nothing was applied.');
   const chkFile = path.join('src', 'commands', '_chk-repair-' + name + '.mjs');
   try {
     fs.writeFileSync(chkFile, candidate);
@@ -1718,6 +1725,8 @@ async function runTemplateConfirmed(ctx, p) {
   const body = (pickTemplate(t.key) || {}).body;
   if (!body) return ctx.reply('Template "' + t.key + '" not found - nothing was added.');
   const code = buildCommandFile(t.cmdName, { desc: t.desc, usage: t.usage, minArgs: t.minArgs, body: body.replaceAll('CMDNAME', t.cmdName) });
+  const gv4 = validateGeneratedSource(code, body.replaceAll('CMDNAME', t.cmdName));
+  if (!gv4.ok) return ctx.reply('The template failed the structural gate (' + gv4.why.slice(0, 80) + ') - nothing was added. (My bug, not yours.)');
   const chkFile = path.join('src', 'commands', '_chk-' + t.cmdName + '.mjs');
   try {
     fs.writeFileSync(chkFile, code);
@@ -1762,6 +1771,8 @@ async function runApiCmdConfirmed(ctx, p) {
     const prob = bodyProblem(body);
     if (prob) { lastFail = prob; continue; }
     const candidate = buildCommandFile(cmdName, { desc: how || cmdName + ' helper', usage: '<input>', minArgs: 1, body });
+    const gv5 = validateGeneratedSource(candidate, body);
+    if (!gv5.ok) { lastFail = 'structural gate: ' + gv5.why; continue; }
     const chkFile = path.join('src', 'commands', '_chk-' + cmdName + '.mjs');
     try {
       fs.writeFileSync(chkFile, candidate);
