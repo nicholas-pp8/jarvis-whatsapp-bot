@@ -1,4 +1,5 @@
 // Agent Mode: give Jarvis a goal, it plans a few steps and runs them.
+import { fetchPublic } from '../utilities/validation.js';
 // - Everyone (SAFE mode): read-only whitelist commands only. Out-of-scope goals
 //   get a clear answer, never generic shell dumps.
 // - Verified owner DM (shell mode, flag 'ownershell'): full-access shell planner.
@@ -613,6 +614,13 @@ export function bodyProblem(b) {
   if (/169\.254\.|127\.0\.0\.1|\blocalhost\b|0\.0\.0\.0|\[::1\]|\b10\.\d+\.\d+\.\d+|192\.168\.|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|metadata\.google/.test(b)) return 'it targeted a local or private network address (not allowed)';
   if (/['"`]http:\/\//.test(b)) return 'it used plain http (https only)';
   if (/(?:writeFileSync|appendFileSync|createWriteStream|mkdirSync|rmSync|unlinkSync|renameSync|copyFileSync|cpSync)\s*\(\s*['"`](?!\/tmp[\/'"]|data[\/'"])/.test(b)) return 'it wrote outside data/ and /tmp (not allowed)';
+  return null;
+}
+// apicmd bodies must route every network call through the guarded ctx.fetchPublic
+// helper; bare fetch of an AI-invented destination is rejected before install.
+export function apicmdNetworkOk(b) {
+  const stripped = String(b || '').replace(/ctx\.fetchPublic\s*\(/g, '');
+  if (/(^|[^\w.])fetch\s*\(/.test(stripped)) return 'it used bare fetch (use ctx.fetchPublic(url) - it validates and pins the destination and returns {status, body:Buffer})';
   return null;
 }
 async function runInstallConfirmed(ctx, p) {
@@ -1708,8 +1716,8 @@ async function runBuilderFlow(ctx, goal) {
     if (!/^https:\/\//i.test(url)) return ctx.reply('The suggested API is not a plain https GET endpoint - I will not use it.');
     let probe = null;
     try {
-      const pr = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      probe = { ok: pr.ok, status: pr.status };
+      const pr = await fetchPublic(url, { timeoutMs: 15000 });
+      probe = { ok: pr.status >= 200 && pr.status < 300, status: pr.status };
     } catch (e) { probe = { ok: false, status: String(e?.message || e).slice(0, 80) }; }
     if (!probe.ok) return ctx.reply('The free API I found for that (' + url.slice(0, 80) + ') is not responding (' + probe.status + '). Not building on a dead source - try again later or name another API.');
     shell.stage([], { kind: 'apicmd', apicmd: { url, cmdName: name, how: String(spec.how || goal).slice(0, 150), goal: goal.slice(0, 200) } });
@@ -1759,7 +1767,7 @@ async function runTemplateConfirmed(ctx, p) {
 async function runApiCmdConfirmed(ctx, p) {
   const { url, cmdName, how, goal } = p.apicmd;
   await ctx.reply('Writing /' + cmdName + ' against ' + url.slice(0, 80) + '...');
-  const prompt = 'Write ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function for a WhatsApp bot command named "/' + cmdName + '". It must use the keyless free API endpoint ' + url + ' via global fetch (no keys exist). Purpose: ' + how + '. Owner request: ' + goal + '. ' + CODEGEN_RULES;
+  const prompt = 'Write ONLY the JavaScript statements that go INSIDE an async run(ctx) {} function for a WhatsApp bot command named "/' + cmdName + '". It must call the keyless free API endpoint ' + url + ' ONLY via ctx.fetchPublic(url) - it returns {status, body:Buffer}, never use bare fetch (no keys exist). Purpose: ' + how + '. Owner request: ' + goal + '. ' + CODEGEN_RULES;
   let code = null; let lastFail = '';
   for (let attempt = 1; attempt <= 3 && !code; attempt++) {
     let body = '';
@@ -1768,7 +1776,7 @@ async function runApiCmdConfirmed(ctx, p) {
       body = r && r.text ? r.text : '';
     } catch (e) { lastFail = 'the AI call failed (' + (e?.message || 'error') + ')'; continue; }
     body = String(body || '').trim().replace(/^```(?:js|javascript)?\s*/im, '').replace(/```\s*$/, '').trim();
-    const prob = bodyProblem(body);
+    const prob = bodyProblem(body) || apicmdNetworkOk(body);
     if (prob) { lastFail = prob; continue; }
     const candidate = buildCommandFile(cmdName, { desc: how || cmdName + ' helper', usage: '<input>', minArgs: 1, body });
     const gv5 = validateGeneratedSource(candidate, body);

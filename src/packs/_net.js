@@ -1,20 +1,28 @@
 // Provider chain for web-backed commands: primary -> one automatic retry -> fallback providers -> clear failure message.
 // Free, no-key sources only. In-memory health stats (providerStatus) and a small response cache.
+import { fetchPublic } from '../utilities/validation.js';
+
 export const health = new Map();
 const cache = new Map();
 const CACHE_MS = 120_000;
-let fetchImpl = (...a) => fetch(...a);
-export const setFetch = (f) => { fetchImpl = f || ((...a) => fetch(...a)); cache.clear(); health.clear(); };
+let fetchImpl = null; // null = guarded default (fetchPublic); setFetch injects a test double
+export const setFetch = (f) => { fetchImpl = f || null; cache.clear(); health.clear(); };
 const rec = (id) => { if (!health.has(id)) health.set(id, { ok: 0, fail: 0, lastOk: null, lastFail: null, lastError: null, consecutiveFail: 0 }); return health.get(id); };
 const note = (id, err) => { const h = rec(id); if (err) { h.fail++; h.consecutiveFail++; h.lastFail = Date.now(); h.lastError = String(err.message || err).slice(0, 120); } else { h.ok++; h.consecutiveFail = 0; h.lastOk = Date.now(); } };
 export const providerStatus = () => [...health.entries()].map(([id, h]) => ({ id, ...h, state: h.consecutiveFail >= 3 ? 'FAILED' : h.ok || !h.fail ? 'WORKING' : 'DEGRADED' }));
 async function get(url, { timeoutMs = 8000, headers = {}, text = false } = {}) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeoutMs || 8000);
   try {
-    const r = await fetchImpl(url, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (JarvisBot)', accept: 'application/json,text/plain,*/*', ...headers } });
-    if (r.status === 429) throw Object.assign(new Error('rate limited'), { rate: true });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const body = await r.text();
+    let status, body;
+    if (fetchImpl) {
+      const r = await fetchImpl(url, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (JarvisBot)', accept: 'application/json,text/plain,*/*', ...headers } });
+      status = r.status; body = await r.text();
+    } else {
+      const r = await fetchPublic(url, { maxBytes: 2_100_000, timeoutMs: timeoutMs || 8000, headers: { 'user-agent': 'Mozilla/5.0 (JarvisBot)', accept: 'application/json,text/plain,*/*', ...headers } });
+      status = r.status; body = r.body.toString('utf8');
+    }
+    if (status === 429) throw Object.assign(new Error('rate limited'), { rate: true });
+    if (status < 200 || status >= 300) throw new Error(`HTTP ${status}`);
     if (!body.trim()) throw Object.assign(new Error('no data'), { final: true });
     if (body.length > 2_000_000) throw new Error('response too large');
     return text ? body : JSON.parse(body);
