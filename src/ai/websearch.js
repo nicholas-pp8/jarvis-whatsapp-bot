@@ -1,5 +1,6 @@
 // Free web access for /ask: DuckDuckGo (no key) + Wikipedia fallback, page fetch, 10-minute cache.
 // Everything here is best-effort and free: any failure just means "no web context", never a broken /ask.
+import { fetchPublic } from '../utilities/validation.js';
 import logger from '../utils/logger.js';
 import { classifyFree, detectStyle } from './providers.js';
 
@@ -64,9 +65,9 @@ function realUrl(href) {
 }
 
 async function fetchText(url, ms = 12000) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(ms), headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
+  const res = await fetchPublic(url, { timeoutMs: ms, headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' } });
+  if (!(res.status >= 200 && res.status < 300)) throw new Error(`HTTP ${res.status}`);
+  return res.body.toString('utf8');
 }
 
 function parseDdg(html, limit) {

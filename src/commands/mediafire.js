@@ -5,6 +5,7 @@ import { Readable } from 'node:stream';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { featOn } from '../config/features.js';
+import { fetchPublic } from '../utilities/validation.js';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -16,27 +17,26 @@ export default {
   async run(ctx) {
     if (!featOn('mediafire')) return ctx.reply('MediaFire downloads are turned off right now.');
     const url = ctx.args[0] || '';
-    if (!/mediafire\.com\//.test(url)) return ctx.reply('Send a MediaFire file link.');
+    let pageHost = '';
+    try { pageHost = new URL(url).hostname; } catch { return ctx.reply('Send a MediaFire file link.'); }
+    if (pageHost !== 'www.mediafire.com' && pageHost !== 'mediafire.com' && !pageHost.endsWith('.mediafire.com')) return ctx.reply('Send a MediaFire file link.');
     const dir = path.join(config.paths.temp, 'mf-' + Date.now());
     try {
       await ctx.reply('⏳ Resolving the MediaFire link...');
-      const html = await (await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36' }, signal: AbortSignal.timeout(20000) })).text();
+      const page = await fetchPublic(url, { timeoutMs: 20000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36' } });
+      const html = page.body.toString('utf8');
       const dm = html.match(/id="downloadButton"[^>]*href="([^"]+)"/) || html.match(/href="(https?:\/\/download\d+\.mediafire\.com\/[^"]+)"/);
       if (!dm) return ctx.reply('⚠️ Could not find the file on that page (folder links and expired files are not supported).');
       const direct = dm[1];
       const name = decodeURIComponent(direct.split('/').pop().split('?')[0] || 'mediafire-file').slice(0, 80);
-      const r = await fetch(direct, { signal: AbortSignal.timeout(120000) });
-      if (!r.ok || !r.body) return ctx.reply('⚠️ The file would not download.');
-      if (Number(r.headers.get('content-length') || 0) > MAX_BYTES) return ctx.reply('⚠️ That file is over 20 MB - too big to send here.');
+      const r = await fetchPublic(direct, { maxBytes: MAX_BYTES + 1, timeoutMs: 120000 });
+      if (r.status !== 200) return ctx.reply('⚠️ The file would not download.');
+      const bytes = r.body.length;
+      if (bytes > MAX_BYTES) return ctx.reply('⚠️ That file is over 20 MB - too big to send here.');
       await fs.promises.mkdir(dir, { recursive: true });
       const out = path.join(dir, name);
-      let bytes = 0;
-      const ws = fs.createWriteStream(out);
-      await new Promise((res, rej) => {
-        Readable.fromWeb(r.body).on('data', (c) => { bytes += c.length; if (bytes > MAX_BYTES) { ws.destroy(); rej(new Error('over 20 MB')); } })
-          .pipe(ws).on('finish', res).on('error', rej);
-      });
-      await ctx.sock.sendMessage(ctx.jid, { document: { url: out }, mimetype: r.headers.get('content-type') || 'application/octet-stream', fileName: name, caption: `📦 ${name} (${(bytes / 1048576).toFixed(1)} MB)` }, { quoted: ctx.msg });
+      fs.writeFileSync(out, r.body);
+      await ctx.sock.sendMessage(ctx.jid, { document: { url: out }, mimetype: r.headers['content-type'] || 'application/octet-stream', fileName: name, caption: `📦 ${name} (${(bytes / 1048576).toFixed(1)} MB)` }, { quoted: ctx.msg });
     } catch (e) {
       logger.warn('[mediafire] failed: ' + (e?.message || 'error'));
       await ctx.reply('⚠️ Could not download that file (' + (e?.message || 'error') + ').');

@@ -7,6 +7,7 @@ import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { DownloadError } from '../utils/downloader.js';
 import { safeFileName } from '../utils/fileManager.js';
+import { fetchPublic } from '../utilities/validation.js';
 
 const require = createRequire(import.meta.url);
 const QUALITIES = [144, 360, 480, 720, 1080];
@@ -51,15 +52,19 @@ export async function downloadViaScraper(cleanUrl, { kind, dir, onProgress }) {
   const meta = res.metadata || {};
   const ext = kind === 'audio' ? '.mp3' : '.mp4';
   const file = path.join(dir, `media${ext}`);
-  const r = await fetch(res.download.url, { signal: AbortSignal.timeout(config.limits.maxDownloadSeconds * 1000) });
-  if (!r.ok || !r.body) throw new DownloadError('❌ Unable to download this video.', { code: 'SCRAPER_HTTP' });
-  const len = Number(r.headers.get('content-length') || 0);
-  if (len > config.limits.maxFileBytes) throw new DownloadError('📦 That file is too large to send.', { code: 'TOO_LARGE' });
+  let r0;
+  try {
+    r0 = await fetchPublic(res.download.url, { maxBytes: config.limits.maxFileBytes + 1, timeoutMs: config.limits.maxDownloadSeconds * 1000 });
+  } catch (e) {
+    if (/too large/i.test(e?.message || '')) throw new DownloadError('📦 That file is too large to send.', { code: 'TOO_LARGE' });
+    throw new DownloadError('❌ Unable to download this video.', { code: 'SCRAPER_HTTP' });
+  }
+  if (!(r0.status >= 200 && r0.status < 300) || !r0.body?.length) throw new DownloadError('❌ Unable to download this video.', { code: 'SCRAPER_HTTP' });
+  const len = Number(r0.headers['content-length'] || 0);
   const title0 = safeFileName(meta.title || res.download.filename, 'youtube');
-  let received = 0;
   onProgress?.({ name: title0, total: len, received: 0 });
-  const counter = new Transform({ transform(chunk, _e, cb) { received += chunk.length; try { onProgress?.({ name: title0, total: len, received }); } catch { /* ignore */ } cb(null, chunk); } });
-  await pipeline(Readable.fromWeb(r.body), counter, fs.createWriteStream(file));
+  fs.writeFileSync(file, r0.body);
+  onProgress?.({ name: title0, total: len, received: r0.body.length });
   const size = fs.statSync(file).size;
   if (size < 1000) throw new DownloadError('❌ Unable to download this video.', { code: 'SCRAPER_EMPTY' });
   if (size > config.limits.maxFileBytes) {
