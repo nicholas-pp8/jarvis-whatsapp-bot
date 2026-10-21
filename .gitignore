@@ -14,3 +14,4 @@ bin/yt-dlp*
 .runtime/
 __pycache__/
 /settings.js
+node_modules_tmp/
