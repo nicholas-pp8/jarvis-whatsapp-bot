@@ -334,7 +334,8 @@ async function npmMeta(pkg) {
     const v = j?.['dist-tags']?.latest;
     if (!v) return { exists: false };
     const d = j?.versions?.[v]?.description || j?.description || '';
-    return { exists: true, version: String(v), description: String(d).slice(0, 200) };
+    const kw = j?.versions?.[v]?.keywords || j?.keywords || [];
+    return { exists: true, version: String(v), description: String(d).slice(0, 200), keywords: (Array.isArray(kw) ? kw : []).map(String).slice(0, 30) };
   } catch (e) { return { exists: null, error: String(e?.message || 'network error').slice(0, 120) }; }
 }
 async function npmSuggest(name) {
@@ -372,6 +373,11 @@ function parseUpdateGoal(goal) {
   if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(pkg)) return null;
   return { pkg };
 }
+const INSTALL_GOAL_STOP = new Set(['install', 'make', 'add', 'create', 'command', 'cmd', 'new', 'the', 'and', 'for', 'with', 'use', 'using', 'please', 'that', 'this', 'bot', 'jarvis', 'like', 'app', 'me']);
+export function installGoalTokens(goal, pkg) {
+  const base = String(pkg || '').toLowerCase().replace(/^@[^/]+\//, '');
+  return new Set(String(goal || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((t) => t.length > 2 && !INSTALL_GOAL_STOP.has(t) && t !== base));
+}
 async function runInstallFlow(ctx, goal) {
   const parsed = parseInstallGoal(goal);
   if (!parsed) return ctx.reply('Tell me the package, e.g. "/agent install mathjs make a calc command".');
@@ -388,7 +394,15 @@ async function runInstallFlow(ctx, goal) {
   if (registry.get(cmdName)) return ctx.reply('/' + cmdName + ' already exists - pick another command name, e.g. "/agent install ' + pkg + ' make a ' + cmdName + '2 command".');
   shell.stage([], { kind: 'install', install: { pkg, version: meta.version, cmdName, desc: String(meta.description || '').slice(0, 150), finalFile: path.join('src', 'commands', cmdName + '.js') } });
   shell.audit('INSTALL STAGED ' + pkg + '@' + meta.version + ' as /' + cmdName);
-  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). After a self-test passes, Jarvis restarts and /' + cmdName + ' is live.\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+  // Qualify the package against the stated goal: warn when the npm description/keywords
+  // share no vocabulary with the request (brand names often map to unrelated packages).
+  const goalToks = installGoalTokens(goal, pkg);
+  const descToks = new Set((String(meta.description || '') + ' ' + (meta.keywords || []).join(' ')).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((t) => t.length > 2));
+  const hit = [...goalToks].some((t) => descToks.has(t) || (t.length > 4 && [...descToks].some((d) => d.startsWith(t) || t.startsWith(d))));
+  const mismatchNote = goalToks.size && !hit
+    ? '\nWarning: npm describes "' + pkg + '" as "' + String(meta.description || 'no description').slice(0, 100) + '" - that does not obviously match what you asked for. Brand names are often unrelated npm packages. Reply YES only if this is really the package you meant.'
+    : '';
+  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). After a self-test passes, Jarvis restarts and /' + cmdName + ' is live.' + mismatchNote + '\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
 }
 async function probeExports(pkg) {
   const script = "const { createRequire } = await import('node:module');"
