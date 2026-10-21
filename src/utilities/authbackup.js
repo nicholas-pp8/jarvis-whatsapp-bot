@@ -15,6 +15,13 @@ const key = () => {
 const authDir = () => config.paths?.auth || path.join(process.cwd(), 'auth');
 const outFile = () => path.join(config.paths.data, 'auth-backup.enc');
 
+const revokedFile = () => path.join(config.paths.data, 'auth-revoked.json');
+export function markRevoked(reason) {
+  try { fs.mkdirSync(config.paths.data, { recursive: true }); fs.writeFileSync(revokedFile(), JSON.stringify({ at: Date.now(), reason: String(reason || 'loggedOut').slice(0, 120) }), { mode: 0o600 }); } catch { /* best effort */ }
+}
+export function clearRevoked() { try { fs.rmSync(revokedFile(), { force: true }); } catch { /* best effort */ } }
+export function isRevoked() { try { fs.lstatSync(revokedFile()); return true; } catch { return false; } }
+
 export function backupNow() {
   const k = key();
   if (!k) return false;
@@ -41,6 +48,8 @@ export function backupNow() {
 export function restoreIfNeeded() {
   const k = key();
   if (!k) return false;
+  // Never resurrect a session WhatsApp explicitly revoked: restoring it only loops logouts.
+  if (isRevoked()) { logger.warn('[authbackup] restore skipped: session was revoked (logged out) - fresh pairing required'); return false; }
   const dir = authDir();
   try {
     const raw = fs.readFileSync(path.join(dir, 'creds.json'), 'utf8');

@@ -247,6 +247,7 @@ export async function startWhatsApp() {
       if (connectionState === 'open') {
         try { const { setSock } = await import('../utilities/ownersock.js'); setSock(s); } catch {}
         try { await bindPairedOwner(s,state.creds.me,config); } catch { config.ownerNumber=''; logger.error('Paired owner identity/save failed. Stopping; check auth storage and connected identity.');return shutdown(1); }
+        try { const { clearRevoked } = await import('../utilities/authbackup.js'); clearRevoked(); } catch {}
         connection(s,true);
         heartbeat?.setConnected(true);
         statusBeat.setConnected(true);
@@ -277,6 +278,7 @@ export async function startWhatsApp() {
           logger.warn('Logged out from WhatsApp (session removed). Clearing saved login; a new pairing will be needed.');
           writeState('logged_out', { code });
           try { const { emit } = await import('../api/events/bus.js'); emit('session.revoked', { code, at: Date.now() }); } catch {}
+          try { const { markRevoked } = await import('../utilities/authbackup.js'); markRevoked('loggedOut status ' + code); } catch {}
           await wipeAuth();
           pairingNumber = config.pairingNumber || config.ownerNumber || pairingNumber;
           return setTimeout(() => startWhatsApp().catch((e) => logger.error('Restart failed:', e)), 3000);
