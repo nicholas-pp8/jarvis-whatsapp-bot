@@ -317,7 +317,7 @@ async function runInfoAnswer(ctx, goal) {
         .map((l) => l.replace(/^\S+\s+/, '')).filter(Boolean);
       if (lines.length) facts.push('Recent activity, newest last:\n' + lines.join('\n'));
     } catch { /* no audit log yet */ }
-    const a = await askAi('You are Jarvis, a WhatsApp bot. The owner asks a question ABOUT your abilities or status. Answer in 2-4 short plain-English sentences. Facts you can use: /agent can install npm packages and create new commands (owner asks, confirms with YES, self-tested before going live); /agent can update one package or all packages with backup + automatic rollback; downloads via /play /video /pinterest; bulk queues with cancel via "/agent cancel downloading"; junk cleanup via "/agent clean up junk". ' +
+    const a = await askAi('You are Jarvis, a WhatsApp bot. The owner asks a question ABOUT your abilities or status. Answer in 2-4 short plain-English sentences. Facts you can use: /agent can install npm packages and create new commands (owner asks, confirms with YES, static-checked before going live); /agent can update one package or all packages with backup + automatic rollback; downloads via /play /video /pinterest; bulk queues with cancel via "/agent cancel downloading"; junk cleanup via "/agent clean up junk". ' +
       (facts.length ? 'Real recent state - use it for questions about recent tasks; only say something was cleared, deleted or updated if this state says so (a scan or check alone means nothing was removed yet):\n' + facts.join('\n') + '\n' : '') +
       'If the question is not about Jarvis, answer normally and briefly. Question: ' + goal);
     // askAi returns { text, ... } - never String() the object itself ("[object Object]" bug).
@@ -566,7 +566,7 @@ async function runInstallFlow(ctx, goal) {
   const mismatchNote = goalToks.size && !hit
     ? '\nNote: you forced this past a vocabulary mismatch - npm describes "' + pkg + '" as "' + String(meta.description || 'no description').slice(0, 100) + '".'
     : '';
-  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). A static pre-check (no package code run) plus the post-install import probe protect it; after a self-test passes, Jarvis restarts and /' + cmdName + ' is live.' + mismatchNote + '\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). A static pre-check (no package code run) plus the post-install import probe protect it; after static checks (safety scan + syntax, no generated code run) pass, Jarvis restarts and /' + cmdName + ' is live.' + mismatchNote + '\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
 }
 async function probeExports(pkg) {
   const script = "const { createRequire } = await import('node:module');"
@@ -617,7 +617,7 @@ export function bodyProblem(b) {
 async function runInstallConfirmed(ctx, p) {
   const { pkg, version, cmdName, desc, finalFile } = p.install;
   const tmpFile = path.join('src', 'commands', '_newcmd-' + cmdName + '.js');
-  await ctx.reply('Confirmed - backing up package files, installing ' + pkg + ', writing /' + cmdName + ', self-testing, then restarting...');
+  await ctx.reply('Confirmed - backing up package files, installing ' + pkg + ', writing /' + cmdName + ', static-checking, then restarting...');
   const mb = await shell.backupManifests();
   if (!mb) return ctx.reply('Aborted - could not back up package.json/package-lock.json first. Nothing was changed.');
   shell.audit('INSTALL ' + pkg + ' manifest backup: ' + mb);
@@ -671,37 +671,12 @@ async function runInstallConfirmed(ctx, p) {
   }
   if (!code) { await rollback('codegen failed: ' + lastFail); return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Rolled back: package uninstalled, nothing added - try again or rephrase.'); }
   fs.writeFileSync(tmpFile, code);
-  // Self-test: usage path only, in a SEPARATE permission-restricted Node process:
-  // fs writes confined to the temp dir, no child_process/worker/addons, transport
-  // fully mocked (nothing leaves the process). Network is NOT restricted there -
-  // the bodyProblem scan covers private/plain-http targets. Partial containment,
-  // not a sandbox; real output stays unproven until the owner runs the command.
-  let selfTestNote = 'usage-path check passed (restricted child process, mocked transport; real output unproven until you run it)';
-  try {
-    const childFile = path.join('src', 'commands', '_selftest-child.mjs');
-    const root = process.cwd();
-    const stmp = fs.mkdtempSync(path.join(os.tmpdir(), 'selftest-'));
-    const allow = '--allow-fs-read=' + JSON.stringify(path.join(root, 'src')) + ' --allow-fs-read=' + JSON.stringify(path.join(root, 'node_modules')) + ' --allow-fs-read=' + JSON.stringify(stmp) + ' --allow-fs-write=' + JSON.stringify(stmp);
-    let r;
-    try {
-      r = await shell.execShell('node --experimental-permission ' + allow + ' ' + JSON.stringify(childFile) + ' ' + JSON.stringify(path.resolve(tmpFile)), { timeoutMs: 45000 });
-    } finally {
-      try { fs.rmSync(stmp, { recursive: true, force: true }); } catch {}
-    }
-    const line = String(r.out || '').split('\n').find((l) => l.startsWith('SELFTEST_JSON:'));
-    if (!line) throw new Error('self-test runner gave no result (' + String(r.out || 'exit ' + r.code).slice(-120).replace(/\n/g, ' ') + ')');
-    const res = JSON.parse(line.slice('SELFTEST_JSON:'.length));
-    if (!res.ok) throw new Error(String(res.error || 'unknown').slice(0, 150));
-    const texts = [...(res.replies || []), ...(res.sent || [])];
-    for (const t of texts) if (t.includes('[object Object]')) throw new Error('a reply contained "[object Object]" (an object was rendered as text)');
-    if (!texts.length) throw new Error('usage path produced no reply at all');
-    shell.audit('INSTALL self-test passed for /' + cmdName + ': ' + selfTestNote);
-  } catch (e) {
-    await shell.execShell('npm uninstall ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 180000 });
-    try { fs.unlinkSync(tmpFile); } catch {}
-    shell.audit('INSTALL self-test FAILED for /' + cmdName + ': ' + (e?.message || 'error') + ' - rolled back');
-    return ctx.reply('The new /' + cmdName + ' failed its self-test (' + String(e?.message || 'error').slice(0, 150) + '). Rolled back: package uninstalled, no command added. Jarvis keeps running as before.');
-  }
+  // STATIC-ONLY validation for arbitrary codegen bodies: safety scan + syntax
+  // check happened above; the generated module is NEVER imported or executed
+  // here (not in this process, not in a child). Functional behavior stays
+  // UNVERIFIED until the owner actually runs the command.
+  const selfTestNote = 'passed static checks only (safety scan + syntax; functional behavior UNVERIFIED until you run it)';
+  shell.audit('INSTALL static validation passed for /' + cmdName + ' (no generated code executed)');
   fs.renameSync(tmpFile, finalFile);
   noteGenerated(cmdName, { pkg, version, file: finalFile, source: 'install', probeKeys: working.flatMap(([, v]) => v.keys || []).slice(0, 40) });
   shell.audit('COMMAND ADDED /' + cmdName + ' (package ' + pkg + ')');
@@ -1320,7 +1295,7 @@ function repairBudgetUse(name) {
 }
 
 /** Rewrite a generated command to fix a runtime error. Same gates as install:
- *  safety scan, node --check, usage-only self-test (no side effects). */
+ *  safety scan, node --check. STATIC-ONLY: rewritten bodies are never executed here. */
 export async function repairCommand(name, errMsg, { apply = true } = {}) {
   const entry = getGenerated(name);
   if (!entry) return { ok: false, why: '/' + name + ' was not generated by me, so I will not rewrite it automatically.' };
@@ -1353,19 +1328,10 @@ export async function repairCommand(name, errMsg, { apply = true } = {}) {
     const chk = await shell.execShell('node --check ' + JSON.stringify(chkFile), { timeoutMs: 30000 });
     if (chk.code !== 0) return { ok: false, why: 'the fix had a syntax error' };
   } finally { try { fs.unlinkSync(chkFile); } catch {} }
-  // usage-only self-test against the candidate (mock ctx, empty args - no side effects)
-  const stFile = path.join('src', 'commands', '_st-' + name + '.js');
-  try {
-    fs.writeFileSync(stFile, candidate);
-    const mod = await import('./_st-' + name + '.js?t=' + Date.now());
-    const cmd = mod.default;
-    if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
-    const replies = [];
-    const mockCtx = { args: [], sender: 'selftest', senderJid: 'selftest', jid: 'selftest', isOwner: true, isGroup: false, msg: {}, text: '', commands: registry, sock: null, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
-    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
-  } catch (e) {
-    return { ok: false, why: 'the fix failed its load test (' + String(e?.message || e).slice(0, 80) + ')' };
-  } finally { try { fs.unlinkSync(stFile); } catch {} }
+  // STATIC-ONLY: safety scan + syntax check above; the rewritten body is never
+  // imported or executed here. Honestly marked unverified - the owner review
+  // gate (staged YES) decides whether it goes live.
+  const repairNote = ' (static checks only - functional behavior unverified)';
   if (!apply) return { ok: true, applied: false, body };
   archiveVersion(name);
   fs.writeFileSync(file, candidate);
@@ -1377,8 +1343,8 @@ export async function repairCommand(name, errMsg, { apply = true } = {}) {
   } catch (e) {
     return { ok: false, why: 'fix written but reload failed (' + String(e?.message || e).slice(0, 80) + ') - a restart will load it' };
   }
-  shell.audit('REPAIR /' + name + ' fixed err="' + String(errMsg).slice(0, 80) + '" (repair #' + ((entry.repairs || 0) + 1) + ')');
-  return { ok: true, applied: true };
+  shell.audit('REPAIR /' + name + ' fixed err="' + String(errMsg).slice(0, 80) + '" (repair #' + ((entry.repairs || 0) + 1) + ')' + repairNote);
+  return { ok: true, applied: true, note: repairNote };
 }
 
 export async function runRepairConfirmed(ctx, p) {
@@ -1411,11 +1377,15 @@ async function runRepairRoute(ctx, name) {
   name = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
   if (!name) return ctx.reply('Say e.g. "/agent repair zenbotscraper".');
   if (!getGenerated(name)) return ctx.reply('/' + name + ' is not a command I generated, so I will not rewrite it.');
-  await ctx.reply('Diagnosing /' + name + ' and attempting a repair (safety scan + load test before anything goes live)...');
+  await ctx.reply('Diagnosing /' + name + ' and preparing a repair (safety scan + syntax check; nothing goes live without your YES)...');
   const fails = readFailures(Date.now() - 7 * 24 * 3600e3).filter((f) => f.cmd === name);
   const lastErr = fails.length ? fails[fails.length - 1].err : 'owner-requested repair (no recent logged error)';
-  const r = await repairCommand(name, lastErr);
-  if (r.ok) return ctx.reply('🔧 Repaired /' + name + ' (last error: ' + lastErr.slice(0, 100) + '). It passes the load test now - try it. Rollback: "/agent restore cmd ' + name + ' 1".');
+  const r = await repairCommand(name, lastErr, { apply: false });
+  if (r.ok) {
+    shell.stage([], { kind: 'repaircmd', repaircmd: { name, body: r.body } });
+    shell.audit('REPAIR STAGED /' + name + ' (owner route)');
+    return ctx.reply('🔧 Repair PREPARED for /' + name + ' (last error: ' + lastErr.slice(0, 100) + ').\nWhat the fixed command does when used: ' + effectsSummary(r.body) + '\nThe fix is AI-written and passed static checks only (safety scan + syntax) - its functional behavior is UNVERIFIED until it runs. Reply YES within 5 minutes to apply it, or NO to discard. Rollback after applying: "/agent restore cmd ' + name + ' 1".');
+  }
   return ctx.reply('I could not repair /' + name + ': ' + r.why + ' Nothing was changed. (Rollback options: "/agent history ' + name + '".)');
 }
 
@@ -1436,7 +1406,7 @@ export async function repairWatchTick() {
       const r = await repairCommand(f.cmd, f.err, { apply: false });
       if (r.ok) {
         shell.stage([], { kind: 'repaircmd', repaircmd: { name: f.cmd, body: r.body } });
-        await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair PREPARED for /' + f.cmd + ' (was failing: "' + f.err.slice(0, 100) + '").\nWhat the fixed command does when used: ' + effectsSummary(r.body) + '\nThe fix is AI-written; it passed the safety scan and load test (heuristic checks, not a proof), and any external service it uses can still fail. Reply YES within 5 minutes to apply it, or NO to discard. I will not auto-prepare another fix for this command today.' }).catch(() => {});
+        await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair PREPARED for /' + f.cmd + ' (was failing: "' + f.err.slice(0, 100) + '").\nWhat the fixed command does when used: ' + effectsSummary(r.body) + '\nThe fix is AI-written; it passed static checks only (safety scan + syntax - its functional behavior is UNVERIFIED), and any external service it uses can still fail. Reply YES within 5 minutes to apply it, or NO to discard. I will not auto-prepare another fix for this command today.' }).catch(() => {});
       } else {
         await s.sendMessage(ownerDM(), { text: '🔧 Auto-repair: /' + f.cmd + ' failed but I could not fix it automatically (' + r.why.slice(0, 150) + '). Original error: ' + f.err.slice(0, 100) }).catch(() => {});
       }
@@ -1737,7 +1707,7 @@ async function runBuilderFlow(ctx, goal) {
     if (!probe.ok) return ctx.reply('The free API I found for that (' + url.slice(0, 80) + ') is not responding (' + probe.status + '). Not building on a dead source - try again later or name another API.');
     shell.stage([], { kind: 'apicmd', apicmd: { url, cmdName: name, how: String(spec.how || goal).slice(0, 150), goal: goal.slice(0, 200) } });
     shell.audit('APICMD STAGED ' + url.slice(0, 80) + ' as /' + name);
-    return ctx.reply('Plan: build /' + name + ' on the free keyless API ' + url.slice(0, 100) + ' (reachable right now). Code is AI-written after your YES, then safety-scanned and load-tested before going live. By rule it can only reply in the chat that calls it, use https, and write only to data/ or /tmp; the scan enforcing that is heuristic, not a proof. Reply YES within 5 minutes, or NO to cancel.');
+    return ctx.reply('Plan: build /' + name + ' on the free keyless API ' + url.slice(0, 100) + ' (reachable right now). Code is AI-written after your YES, then safety-scanned and syntax-checked before going live (no generated code is executed pre-live; functional behavior is unverified until first use). By rule it can only reply in the chat that calls it, use https, and write only to data/ or /tmp; the scan enforcing that is heuristic, not a proof. Reply YES within 5 minutes, or NO to cancel.');
   }
   return ctx.reply('I could not plan that command. Try naming the npm package directly, e.g. "/agent install <package>".');
 }
@@ -1760,7 +1730,7 @@ async function runTemplateConfirmed(ctx, p) {
     const mod = await import('./_st-' + t.cmdName + '.js?t=' + Date.now());
     const cmd = mod.default;
     if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
-    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: registry, sock: ctx.sock, reply: async () => ({ key: {} }) };
+    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: registry, sock: { sendMessage: async () => ({ key: {} }), updateMediaMessage: async () => ({}) }, reply: async () => ({ key: {} }) };
     await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
     try { fs.unlinkSync(stFile); } catch {}
   } catch (e) {
@@ -1800,27 +1770,16 @@ async function runApiCmdConfirmed(ctx, p) {
     } finally { try { fs.unlinkSync(chkFile); } catch {} }
   }
   if (!code) return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Nothing was added.');
-  try {
-    const stFile = path.join('src', 'commands', '_st-' + cmdName + '.js');
-    fs.writeFileSync(stFile, code);
-    const mod = await import('./_st-' + cmdName + '.js?t=' + Date.now());
-    const cmd = mod.default;
-    if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
-    const replies = [];
-    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: registry, sock: ctx.sock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
-    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
-    try { fs.unlinkSync(stFile); } catch {}
-  } catch (e) {
-    try { fs.unlinkSync(path.join('src', 'commands', '_st-' + cmdName + '.js')); } catch {}
-    return ctx.reply('/' + cmdName + ' failed its load test (' + String(e?.message || e).slice(0, 120) + ') - nothing was added.');
-  }
+  // STATIC-ONLY: safety scan + syntax check in the loop above; the generated
+  // module is never imported or executed here. Honestly labeled unverified.
+  const apiNote = 'passed static checks only (safety scan + syntax; functional behavior UNVERIFIED until you run it)';
   const finalFile = path.join('src', 'commands', cmdName + '.js');
   fs.writeFileSync(finalFile, code);
   const mod = await import('./' + cmdName + '.js?t=' + Date.now());
   registry.register(mod.default);
   noteGenerated(cmdName, { file: finalFile, source: 'builder', apiUrl: url });
   shell.audit('COMMAND ADDED /' + cmdName + ' (API ' + url.slice(0, 60) + ')');
-  await ctx.reply('/' + cmdName + ' is live now (no restart needed). It loads correctly (usage self-test passed); real features are only proven when you run it - if it errors, it will show the real reason.');
+  await ctx.reply('/' + cmdName + ' is live now (no restart needed). ' + apiNote.charAt(0).toUpperCase() + apiNote.slice(1) + '; real features are only proven when you run it - if it errors, it will show the real reason.');
   return true;
 }
 
