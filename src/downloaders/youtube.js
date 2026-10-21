@@ -55,7 +55,7 @@ export async function download(url, { kind, dir, onProgress }) {
   }
   const fallbackToScraper = async (err) => {
     if (scraperFirst || ['TOO_LARGE', 'LIVE', 'TOO_LONG', 'PRIVATE', 'INVALID'].includes(err.code)) return null;
-    try { logger.warn('[youtube] yt-dlp failed, trying backup service'); return await scraper(); } catch (e) { logger.warn(`[ytscraper] backup failed (${e.code || e.message})`); return null; }
+    try { logger.warn('[youtube] yt-dlp failed, trying backup service'); return await scraper(); } catch (e) { if (e.code === 'WRONG_CONTENT') throw e; logger.warn(`[ytscraper] backup failed (${e.code || e.message})`); return null; }
   };
   let meta;
   try {
