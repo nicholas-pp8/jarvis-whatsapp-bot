@@ -70,6 +70,7 @@ async function requestPairing(s) {
     console.log('  > "Link with phone number instead" and enter the code.');
     console.log('  The code expires in about 2 minutes.');
     console.log('==============================================\n');
+    logger.warn('PAIRING CODE issued to owner number, valid about 2 minutes: ' + pretty);
   } catch (err) {
     logger.error('Could not get a pairing code:', err);
   }
