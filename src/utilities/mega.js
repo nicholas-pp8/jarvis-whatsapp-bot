@@ -1,6 +1,7 @@
 // MEGA public-file downloads, clean-room, zero dependencies.
 // Only public file links (mega.nz/file/<id>#<key>). Folders are not supported.
 // Streams to disk through the decryptor so big files never sit in RAM.
+import { fetchPublicStream } from './validation.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,15 +54,15 @@ export async function megaInfo(url) {
 export async function megaDownload(url, destDir) {
   const info = await megaInfo(url);
   if (info.size > MAX_BYTES) throw new Error(`File is ${(info.size / 1048576).toFixed(1)} MB - over the 20 MB limit`);
-  const r = await fetch(info.url, { signal: AbortSignal.timeout(120000) });
-  if (!r.ok || !r.body) throw new Error('Download failed (' + r.status + ')');
+  const r = await fetchPublicStream(info.url, { maxBytes: MAX_BYTES + 1, timeoutMs: 120000 });
+  if (!(r.status >= 200 && r.status < 300) || !r.stream) throw new Error('Download failed (' + r.status + ')');
   await fs.promises.mkdir(destDir, { recursive: true });
   const out = path.join(destDir, info.name.replace(/[^\w. ()-]/g, '_').slice(0, 80) || 'mega-file');
   // IV = 8-byte nonce (key bytes 16..24) + 8-byte block counter starting at 0.
   // (Key bytes 24..32 are the meta-MAC, not the counter - MEGA CTR starts at 0 for full downloads.)
   const iv = Buffer.concat([info.key.subarray(16, 24), Buffer.alloc(8)]);
   const dec = crypto.createDecipheriv('aes-128-ctr', info.aes, iv);
-  await pipeline(Readable.fromWeb(r.body), dec, fs.createWriteStream(out));
+  await pipeline(r.stream, dec, fs.createWriteStream(out));
   const st = await fs.promises.stat(out);
   return { path: out, name: path.basename(out), size: st.size };
 }

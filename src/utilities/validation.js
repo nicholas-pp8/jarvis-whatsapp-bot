@@ -7,12 +7,14 @@ export async function publicURL(text,lookup=dns.lookup){let u;try{u=new URL(text
 import http from 'node:http';
 import https from 'node:https';
 
-/** Fetch a user-influenced URL safely: every redirect hop is re-validated with
- *  publicURL (http/https, ports 80/443, no credentials, all resolved IPs public)
- *  and the connection is pinned to a validated address, so a public-looking URL
- *  cannot redirect or rebind into private/internal targets. Returns
- *  { status, headers, body: Buffer, finalUrl }. Throws on private/blocked targets. */
-export async function fetchPublic(text, { maxBytes = 2 * 1024 * 1024, timeoutMs = 20000, headers = {}, depth = 0 } = {}) {
+/** One validated request to a user-influenced URL: every redirect hop is
+ *  re-validated with publicURL (http/https, ports 80/443, no credentials, all
+ *  resolved IPs public) and the connection is pinned to a validated address,
+ *  so a public-looking URL cannot redirect or rebind into private/internal
+ *  targets. Returns { status, headers, stream, finalUrl }; the caller must
+ *  consume or destroy the stream. With follow:false, redirect responses are
+ *  returned to the caller (stream already drained) instead of followed. */
+export async function requestPublic(text, { method = 'GET', timeoutMs = 20000, headers = {}, depth = 0, follow = true } = {}) {
   if (depth > 3) throw new Error('Too many redirects');
   const u = await publicURL(text);
   const host = u.hostname.replace(/^\[|\]$/g, '');
@@ -20,20 +22,41 @@ export async function fetchPublic(text, { maxBytes = 2 * 1024 * 1024, timeoutMs 
   if (!records.length || records.some((x) => privateIP(x.address))) throw new Error('That address is not allowed (private or unreachable).');
   const chosen = records.find((x) => x.family === 4) || records[0];
   const res = await new Promise((ok, no) => {
-    const req = (u.protocol === 'https:' ? https : http).get(u, {
+    const req = (u.protocol === 'https:' ? https : http).request(u, {
+      method,
       headers: { 'Accept-Encoding': 'identity', ...headers },
       lookup: (_h, opts, cb) => cb(null, opts.all ? [chosen] : chosen.address, chosen.family),
-    }, (r) => {
-      let n = 0; const chunks = [];
-      r.on('data', (c) => { n += c.length; if (n > maxBytes) { r.destroy(); no(new Error('Response too large')); } else chunks.push(c); });
-      r.on('end', () => ok({ status: r.statusCode, headers: r.headers, body: Buffer.concat(chunks) }));
-      r.on('error', no);
-    });
+    }, (r) => ok(r));
     req.setTimeout(timeoutMs, () => req.destroy(new Error('Request timed out')));
     req.on('error', no);
+    req.end();
   });
-  if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.location) {
-    return fetchPublic(new URL(res.headers.location, u).href, { maxBytes, timeoutMs, headers, depth: depth + 1 });
+  if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+    res.resume();
+    if (!follow) return { status: res.statusCode, headers: res.headers, stream: null, finalUrl: u.href };
+    return requestPublic(new URL(res.headers.location, u).href, { method, timeoutMs, headers, depth: depth + 1, follow });
   }
-  return { status: res.status, headers: res.headers, body: res.body, finalUrl: u.href };
+  return { status: res.statusCode, headers: res.headers, stream: res, finalUrl: u.href };
+}
+
+/** Buffered variant: whole body in memory, hard-capped. */
+export async function fetchPublic(text, { maxBytes = 2 * 1024 * 1024, timeoutMs = 20000, headers = {} } = {}) {
+  const r = await requestPublic(text, { timeoutMs, headers });
+  const body = await new Promise((ok, no) => {
+    let n = 0; const chunks = [];
+    r.stream.on('data', (c) => { n += c.length; if (n > maxBytes) { r.stream.destroy(); no(new Error('Response too large')); } else chunks.push(c); });
+    r.stream.on('end', () => ok(Buffer.concat(chunks)));
+    r.stream.on('error', no);
+  });
+  return { status: r.status, headers: r.headers, body, finalUrl: r.finalUrl };
+}
+
+/** Streaming variant: pipe to a destination with a byte cap (for large media). */
+export async function fetchPublicStream(text, { maxBytes = 100 * 1024 * 1024, timeoutMs = 60000, headers = {} } = {}) {
+  const r = await requestPublic(text, { timeoutMs, headers });
+  const { Transform } = await import('node:stream');
+  let n = 0;
+  const counter = new Transform({ transform(c, _e, cb) { n += c.length; n > maxBytes ? cb(new Error('Response too large')) : cb(null, c); } });
+  r.stream.on('error', (e) => counter.destroy(e));
+  return { status: r.status, headers: r.headers, stream: r.stream.pipe(counter), finalUrl: r.finalUrl };
 }

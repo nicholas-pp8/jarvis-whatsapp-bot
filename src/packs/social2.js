@@ -1,3 +1,4 @@
+import { fetchPublic } from '../utilities/validation.js';
 import { runDownloadCommand } from '../commands/_download.js';
 // Instagram and Facebook public lookups. Public profiles and pages only; private ones return a clear message. No login, no keys.
 const UA = 'Mozilla/5.0 (JarvisBot)';
@@ -34,7 +35,7 @@ export async function fbPage(name, F = (...a) => fetch(...a)) {
 const pageName = (a) => { const u = String(a[0] || '').replace(/^https?:\/\/(www\.|m\.)?facebook\.com\//i, '').split(/[/?#]/)[0]; if (!/^[A-Za-z0-9.\-]{3,80}$/.test(u)) throw new Error('give a public page name or link'); return u; };
 const mk = (name, description, usage, fn, test, extra = {}) => ({ name, category: 'Social Lookup', description, usage, aliases: [], minArgs: 1, pack: true, web: true, ownerOnly: false, group: false, image: false, tests: [test], fn: null, ...extra,
   async run(ctx) { if (!(ctx.args || []).length) return ctx.reply(`Usage: /${usage}`); try { await fn(ctx, ctx.args); } catch (e) { await ctx.reply(`Could not run ${name}: ${e.message}`); } } });
-const sendPic = async (ctx, url, caption) => { const r = await fetch(url, { signal: AbortSignal.timeout(15000) }); if (!r.ok) throw new Error('picture not available'); const b = Buffer.from(await r.arrayBuffer()); if (b.length > 8e6) throw new Error('picture too large'); await ctx.sock.sendMessage(ctx.jid, { image: b, caption }, { quoted: ctx.msg }); };
+const sendPic = async (ctx, url, caption) => { const r = await fetchPublic(url, { timeoutMs: 15000, maxBytes: 8e6 + 1 }); if (!(r.status >= 200 && r.status < 300)) throw new Error('picture not available'); const b = r.body; if (b.length > 8e6) throw new Error('picture too large'); await ctx.sock.sendMessage(ctx.jid, { image: b, caption }, { quoted: ctx.msg }); };
 export default [
   mk('igprofile', 'Public Instagram profile info', 'igprofile <username>', async (ctx, a) => { const u = await igProfile(user(a)); await ctx.reply(`@${u.username}${u.is_verified ? ' (verified)' : ''}\n${u.full_name || ''}\nFollowers: ${n(u.edge_followed_by?.count)}  Following: ${n(u.edge_follow?.count)}  Posts: ${n(u.edge_owner_to_timeline_media?.count)}\n${u.is_private ? 'Private account' : 'Public account'}\nBio: ${(u.biography || 'none').slice(0, 300)}`); }, ['', 'Usage']),
   mk('igdp', 'Public Instagram profile picture', 'igdp <username>', async (ctx, a) => { const u = await igProfile(user(a)); await sendPic(ctx, u.profile_pic_url_hd || u.profile_pic_url, `@${u.username}`); }, ['', 'Usage']),

@@ -1,3 +1,4 @@
+import { fetchPublic, requestPublic } from '../utilities/validation.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
@@ -21,9 +22,9 @@ export function matches(url) {
 async function resolveShort(url) {
   let current = url;
   for (let i = 0; i < 5 && !pinId(current); i++) {
-    const res = await fetch(current, { redirect: 'manual', headers: { 'user-agent': UA } });
+    const res = await requestPublic(current, { follow: false, headers: { 'user-agent': UA } });
     if (res.status < 300 || res.status >= 400) break;
-    const loc = res.headers.get('location');
+    const loc = res.headers.location;
     if (!loc) break;
     const next = new URL(loc, current);
     if (next.protocol !== 'https:' || !(PIN_HOST.test(next.hostname) || next.hostname === 'pin.it')) {
@@ -46,10 +47,10 @@ async function fetchPin(id) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30_000);
   try {
-    const res = await fetch(api, { signal: ctrl.signal, headers: { 'user-agent': UA, accept: 'application/json', 'x-pinterest-pws-handler': 'www/pin/[id].js' } });
+    const res = await fetchPublic(api, { headers: { 'user-agent': UA, accept: 'application/json', 'x-pinterest-pws-handler': 'www/pin/[id].js' } });
     if (res.status === 404) throw new DownloadError('❌ This pin was not found. It may have been deleted.', { code: 'UNAVAILABLE' });
-    if (!res.ok) throw new DownloadError('❌ Pinterest did not return this pin.\n\nIt may be private or unavailable.', { code: 'FAILED' });
-    const json = await res.json();
+    if (!(res.status >= 200 && res.status < 300)) throw new DownloadError('❌ Pinterest did not return this pin.\n\nIt may be private or unavailable.', { code: 'FAILED' });
+    const json = JSON.parse(res.body.toString('utf8'));
     const pin = json?.resource_response?.data;
     if (!pin || json.resource_response.status !== 'success') throw new DownloadError('❌ This pin was not found or is private.', { code: 'UNAVAILABLE' });
     return pin;
@@ -111,9 +112,9 @@ export async function download(url, { dir }) {
  * into a single file (fMP4 or MPEG-TS). ffmpeg's own network HLS path is avoided on purpose: the panel's
  * ffmpeg 7.0.2-static build segfaults fetching Pinterest's fMP4 HLS playlists over https. */
 async function fetchHlsToFile(playlistUrl, out, { maxBytes, deadline }) {
-  const res = await fetch(playlistUrl, { headers: { 'user-agent': UA, referer: 'https://www.pinterest.com/' }, signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`playlist HTTP ${res.status}`);
-  const text = await res.text();
+  const res = await fetchPublic(playlistUrl, { headers: { 'user-agent': UA, referer: 'https://www.pinterest.com/' }, timeoutMs: 30_000 });
+  if (!(res.status >= 200 && res.status < 300)) throw new Error(`playlist HTTP ${res.status}`);
+  const text = res.body.toString('utf8');
   if (/#EXT-X-STREAM-INF/.test(text)) throw new Error('master playlist passed where a variant was expected');
   let map = null; let nextRange = null; const parts = [];
   for (const raw of text.split('\n')) {
@@ -132,9 +133,9 @@ async function fetchHlsToFile(playlistUrl, out, { maxBytes, deadline }) {
       if (Date.now() > deadline) throw new Error('HLS download timed out');
       const headers = { 'user-agent': UA, referer: 'https://www.pinterest.com/' };
       if (part.range) headers.range = `bytes=${part.range[1]}-${part.range[1] + part.range[0] - 1}`;
-      const r = await fetch(part.url, { headers, signal: AbortSignal.timeout(60_000) });
-      if (!r.ok) throw new Error(`segment HTTP ${r.status}`);
-      const buf = Buffer.from(await r.arrayBuffer());
+      const r = await fetchPublic(part.url, { headers, timeoutMs: 60_000, maxBytes });
+      if (!(r.status >= 200 && r.status < 300)) throw new Error(`segment HTTP ${r.status}`);
+      const buf = r.body;
       total += buf.length;
       if (total > maxBytes) { const e = new Error('HLS stream exceeds the size limit'); e.code = 'TOO_LARGE'; throw e; }
       await fh.write(buf);
@@ -145,9 +146,9 @@ async function fetchHlsToFile(playlistUrl, out, { maxBytes, deadline }) {
 
 /** Resolves a (master or variant) HLS playlist to { video, audio } variant playlist URLs, picking the highest-bandwidth rendition. */
 async function resolveHls(masterUrl) {
-  const res = await fetch(masterUrl, { headers: { 'user-agent': UA, referer: 'https://www.pinterest.com/' }, signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`playlist HTTP ${res.status}`);
-  const text = await res.text();
+  const res = await fetchPublic(masterUrl, { headers: { 'user-agent': UA, referer: 'https://www.pinterest.com/' }, timeoutMs: 30_000 });
+  if (!(res.status >= 200 && res.status < 300)) throw new Error(`playlist HTTP ${res.status}`);
+  const text = res.body.toString('utf8');
   if (!/#EXT-X-STREAM-INF/.test(text)) return { video: masterUrl, audio: null };
   let best = null;
   for (const m of text.matchAll(/#EXT-X-STREAM-INF:[^\n]*BANDWIDTH=(\d+)[^\n]*\n([^\n]+)/g)) {
@@ -289,12 +290,12 @@ async function searchPage(query, bookmark) {
   const options = { query, scope: 'pins', rs: 'typed', page_size: 25 };
   if (bookmark) options.bookmarks = [bookmark];
   u.searchParams.set('data', JSON.stringify({ options, context: {} }));
-  const res = await fetch(u, {
-    signal: AbortSignal.timeout(25_000),
+  const res = await fetchPublic(u.href ?? u, {
+    timeoutMs: 25_000,
     headers: { 'user-agent': UA, accept: 'application/json', 'x-pinterest-pws-handler': 'www/search/[scope].js', 'x-requested-with': 'XMLHttpRequest' },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
+  if (!(res.status >= 200 && res.status < 300)) throw new Error(`HTTP ${res.status}`);
+  const json = JSON.parse(res.body.toString('utf8'));
   const rr = json?.resource_response;
   const list = (rr?.data?.results || []).filter((p) => p?.id && p.type === 'pin' && (p.images?.orig?.url || p.images?.['736x']?.url));
   const bm = typeof rr?.bookmark === 'string' && rr.bookmark !== '-end-' ? rr.bookmark : null;

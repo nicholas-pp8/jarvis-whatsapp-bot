@@ -1,3 +1,4 @@
+import { requestPublic } from '../utilities/validation.js';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 const SHORT = new Set(['bit.ly','tinyurl.com','t.co','goo.gl','is.gd','cutt.ly','rb.gy','ow.ly','shorturl.at','tiny.cc','buff.ly','rebrand.ly']);
@@ -61,8 +62,8 @@ export async function expand(raw, max = 4) {
     if (!net.isIP(u.hostname)) { const a = await dns.lookup(u.hostname, { all: true }).catch(() => []); if (!a.length || a.some((x) => isPrivateIp(x.address))) break; }
     else if (isPrivateIp(u.hostname)) break;
     let r;
-    try { r = await fetch(cur, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(6000), headers: { 'user-agent': 'Mozilla/5.0' } }); } catch { break; }
-    const loc = r.headers.get('location');
+    try { r = await requestPublic(cur, { method: 'HEAD', follow: false, timeoutMs: 6000, headers: { 'user-agent': 'Mozilla/5.0' } }); } catch { break; }
+    const loc = r.headers.location;
     if (r.status >= 300 && r.status < 400 && loc) { cur = new URL(loc, cur).href; chain.push(cur); } else break;
   }
   return chain;

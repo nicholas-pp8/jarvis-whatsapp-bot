@@ -1,6 +1,7 @@
 // Table-driven public-media downloaders for many social platforms. Public content only: no cookies, logins, DRM or paywall bypass.
 // Each platform is isolated: a failure in one never affects another. Chain per request:
 //   1) yt-dlp (if the platform has an extractor)  2) retry once  3) page metadata (og:video / og:audio / og:image, oEmbed)  4) clear failure message.
+import { requestPublic, fetchPublic } from '../utilities/validation.js';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
@@ -124,8 +125,8 @@ export async function pageMeta(url, { fetchImpl } = {}) {
     try {
       let cur = new URL(url);
       for (let hop = 0; hop < 4; hop++) {
-        await assertPublicHost(cur);
-        const r = await (fetchImpl || timedFetch)(cur, { redirect: 'manual', headers: { 'user-agent': ua, accept: 'text/html,*/*' } });
+        const r0 = fetchImpl ? null : await requestPublic(cur.href ?? cur, { follow: false, headers: { 'user-agent': ua, accept: 'text/html,*/*' } }).catch((e) => { throw Object.assign(new Error(e.message), { code: e.code || 'NETWORK' }); });
+        const r = fetchImpl ? await fetchImpl(cur, { redirect: 'manual', headers: { 'user-agent': ua, accept: 'text/html,*/*' } }) : { status: r0.status, headers: { get: (k) => r0.headers[k.toLowerCase()] ?? null }, text: async () => (await fetchPublic(cur.href ?? cur, { headers: { 'user-agent': ua, accept: 'text/html,*/*' } })).body.toString('utf8') };
         if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { cur = new URL(r.headers.get('location'), cur); continue; }
         if (r.status === 404 || r.status === 410) throw Object.assign(new Error('content not found or deleted'), { final: true });
         if (r.status === 401 || r.status === 403) { last = 'login or access required'; break; }
@@ -153,19 +154,21 @@ async function oembedMeta(base, url) {
 async function fetchToFile(mediaUrl, dir, base, maxBytes) {
   let cur = new URL(mediaUrl);
   for (let hop = 0; hop < 4; hop++) {
-    await assertPublicHost(cur);
-    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 60000);
+    let r0;
     try {
-      const r = await fetch(cur, { redirect: 'manual', signal: ctrl.signal, headers: { 'user-agent': UAS[0] } });
-      if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { cur = new URL(r.headers.get('location'), cur); continue; }
-      if (!r.ok || !r.body) throw new DownloadError('The media could not be fetched.', { code: 'NETWORK' });
-      const declared = Number(r.headers.get('content-length')); if (declared && declared > maxBytes) throw new DownloadError('TOO_LARGE', { code: 'TOO_LARGE' });
+      r0 = await requestPublic(cur.href, { follow: false, timeoutMs: 60000, headers: { 'user-agent': UAS[0] } });
+    } catch (e) { throw new DownloadError('The media could not be fetched. ' + (e.message || ''), { code: 'NETWORK' }); }
+    {
+      const r = { status: r0.status, headers: { get: (k) => r0.headers[k.toLowerCase()] ?? null } };
+      if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { r0.stream?.resume?.(); cur = new URL(r.headers.get('location'), cur); continue; }
+      if (!(r.status >= 200 && r.status < 300) || !r0.stream) throw new DownloadError('The media could not be fetched.', { code: 'NETWORK' });
+      const declared = Number(r.headers.get('content-length')); if (declared && declared > maxBytes) { r0.stream.resume(); throw new DownloadError('TOO_LARGE', { code: 'TOO_LARGE' }); }
       const dest = path.join(dir, base + '.bin'); let got = 0;
       const { Transform } = await import('node:stream');
-      await pipeline(Readable.fromWeb(r.body), new Transform({ transform(c, _e, cb) { got += c.length; got > maxBytes ? cb(new DownloadError('TOO_LARGE', { code: 'TOO_LARGE' })) : cb(null, c); } }), fsSync.createWriteStream(dest));
+      await pipeline(r0.stream, new Transform({ transform(c, _e, cb) { got += c.length; got > maxBytes ? cb(new DownloadError('TOO_LARGE', { code: 'TOO_LARGE' })) : cb(null, c); } }), fsSync.createWriteStream(dest));
       if (declared && got < declared) throw new DownloadError('The download was incomplete.', { code: 'FAILED' });
       return { dest, size: got };
-    } catch (e) { if (e instanceof DownloadError) throw e; throw new DownloadError(e.name === 'AbortError' ? 'The download took too long and was cancelled.' : 'Network problem while downloading.', { code: e.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK', cause: e }); } finally { clearTimeout(timer); }
+    }
   }
   throw new DownloadError('Too many redirects.', { code: 'FAILED' });
 }
