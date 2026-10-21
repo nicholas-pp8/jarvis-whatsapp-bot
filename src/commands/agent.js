@@ -303,8 +303,22 @@ function isInfoQuestion(goal) {
 }
 async function runInfoAnswer(ctx, goal) {
   try {
-    const a = await askAi('You are Jarvis, a WhatsApp bot. The owner asks a question ABOUT your abilities or status. Answer in 2-4 short plain-English sentences. Facts you can use: /agent can install npm packages and create new commands (owner asks, confirms with YES, self-tested before going live); /agent can update one package or all packages with backup + automatic rollback; downloads via /play /video /pinterest; bulk queues with cancel via "/agent cancel downloading"; junk cleanup via "/agent clean up junk". If the question is not about Jarvis, answer normally and briefly. Question: ' + goal);
-    return ctx.reply(String(a || 'I am not sure about that.').slice(0, 900));
+    // Real recent context, so follow-ups like "cleared?" answer about the actual last
+    // task - never manufactured clearance.
+    const facts = [];
+    const prev = loadSession();
+    if (prev) facts.push('Most recent /agent task: goal "' + prev.goal + '"; outcome: ' + prev.summary);
+    try {
+      const lines = fs.readFileSync(path.join('data', 'agent-audit.log'), 'utf8').trim().split('\n').slice(-8)
+        .map((l) => l.replace(/^\S+\s+/, '')).filter(Boolean);
+      if (lines.length) facts.push('Recent activity, newest last:\n' + lines.join('\n'));
+    } catch { /* no audit log yet */ }
+    const a = await askAi('You are Jarvis, a WhatsApp bot. The owner asks a question ABOUT your abilities or status. Answer in 2-4 short plain-English sentences. Facts you can use: /agent can install npm packages and create new commands (owner asks, confirms with YES, self-tested before going live); /agent can update one package or all packages with backup + automatic rollback; downloads via /play /video /pinterest; bulk queues with cancel via "/agent cancel downloading"; junk cleanup via "/agent clean up junk". ' +
+      (facts.length ? 'Real recent state - use it for questions about recent tasks; only say something was cleared, deleted or updated if this state says so (a scan or check alone means nothing was removed yet):\n' + facts.join('\n') + '\n' : '') +
+      'If the question is not about Jarvis, answer normally and briefly. Question: ' + goal);
+    // askAi returns { text, ... } - never String() the object itself ("[object Object]" bug).
+    const t = String(a?.text || a || '').trim();
+    return ctx.reply((t || 'I am not sure about that.').slice(0, 900));
   } catch { return ctx.reply('I could not think that through right now - try again in a moment.'); }
 }
 
@@ -347,11 +361,14 @@ function parseInstallGoal(goal) {
 }
 function parseUpdateGoal(goal) {
   if (!/^\s*update\b/i.test(goal)) return null;
-  const m = goal.match(/^\s*update\s+(all|everything|@?[a-z0-9][a-z0-9._\/-]*)/i);
-  if (!m) return null;
-  const target = m[1].toLowerCase();
-  if (/^(all|everything)$/.test(target)) return { updateAll: true };
-  const pkg = m[1].replace(/\.+$/, '');
+  // Strip filler words so "update to the latest patch" is not parsed as a package named "to".
+  const rest = goal.replace(/^\s*update\b/i, '').trim().toLowerCase()
+    .replace(/^((?:to|the|a|an|my)\s+)+/, '').replace(/\s+/g, ' ').replace(/[.!]+$/, '');
+  // "latest patch/version/release" or "itself/the bot/jarvis" mean the BOT's own code, not an npm package.
+  if (/^(latest|newest|new)(\s+(patch|version|release|update))?$/.test(rest) ||
+      /^(patch|version|release|itself|yourself|the\s+bot|jarvis|bot|code|source)$/.test(rest)) return { botSelf: true };
+  if (/^(all|everything)\b/.test(rest)) return { updateAll: true };
+  const pkg = rest.split(' ')[0].replace(/\.+$/, '');
   if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(pkg)) return null;
   return { pkg };
 }
@@ -494,7 +511,19 @@ async function runInstallConfirmed(ctx, p) {
 }
 async function runUpdateFlow(ctx, goal) {
   const parsed = parseUpdateGoal(goal);
-  if (!parsed) return ctx.reply('Say "/agent update all" or "/agent update <package>".');
+  if (!parsed) return ctx.reply('Say "/agent update all" or "/agent update <package>". For the bot code itself, say "/agent update to latest patch".');
+  if (parsed.botSelf) {
+    // Bot CODE update request, not an npm package: check GitHub read-only. Never auto-apply,
+    // never touch npm packages from this path.
+    try {
+      const { updater } = await import('../ops/index.js');
+      const n = await updater.check(true);
+      if (!n) return ctx.reply('Jarvis code is already at the latest patch on GitHub - nothing to update.');
+      return ctx.reply('There is a newer Jarvis code patch on GitHub (commit ' + String(n.sha).slice(0, 10) + (n.version ? ', v' + n.version : '') + '). No package was touched or installed. Bot-code updates only go through the checked "/update" flow or a tested deployment.' + (n.blockedReason ? ' Note: ' + n.blockedReason : ''));
+    } catch (e) {
+      return ctx.reply('I could not check GitHub for the latest Jarvis patch just now (' + String(e?.message || 'error').slice(0, 120) + '). Try again in a moment.');
+    }
+  }
   await ctx.reply('Checking for updates...');
   const list = [];
   if (parsed.updateAll) {
