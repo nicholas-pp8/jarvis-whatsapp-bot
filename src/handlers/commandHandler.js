@@ -65,6 +65,10 @@ export async function loadCommands() {
     const { loadGenerated } = await import('../utils/genregistry.js');
     generatedNames = new Set(loadGenerated().map((x) => x && x.name).filter(Boolean));
   } catch { /* no registry readable - prefix detection still applies */ }
+  try {
+    const known = JSON.parse(await fs.readFile(path.join('data', 'generated-known.json'), 'utf8'));
+    for (const n of Array.isArray(known) ? known : []) if (typeof n === 'string' && n) generatedNames.add(n);
+  } catch { /* panel-local provenance list is optional */ }
   for (const f of (await fs.readdir(dir)).sort()) {
     if (!f.endsWith('.js') || f.startsWith('_')) continue;
     const cname = f.replace(/\.js$/, '');

@@ -74,13 +74,27 @@ export function validateGeneratedLoose(code) {
   let ast;
   try { ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module' }); }
   catch (e) { return fail('the file did not parse: ' + String(e.message || e).slice(0, 120)); }
+  let sawDefault = false;
   for (const stmt of ast.body) {
-    if (stmt.type === 'ImportDeclaration') continue;
+    if (stmt.type === 'ImportDeclaration') {
+      // Side-effect and dependency imports EXECUTE at load. Allow only: node:
+      // builtins, installed bare packages, known repo helpers. No other relative
+      // or parent paths, no absolute paths, no file: URLs.
+      const src = String(stmt.source && stmt.source.value || '');
+      const okImport = src.startsWith('node:')
+        || /^[a-z@][a-z0-9._\/-]*$/i.test(src) && !src.startsWith('.') && !src.startsWith('/')
+        || src.startsWith('../utils/') || /^\.\/_[a-z0-9]+\.js$/i.test(src);
+      if (!okImport) return fail('import from an unapproved source: ' + src.slice(0, 60));
+      continue;
+    }
     if (stmt.type !== 'ExportDefaultDeclaration') return fail('unexpected top-level statement: ' + stmt.type);
+    if (sawDefault) return fail('more than one default export');
+    sawDefault = true;
     const d = stmt.declaration;
     if (d.type !== 'ObjectExpression') return fail('default export must be an object literal');
     for (const p of d.properties) {
       if (p.type !== 'Property' || p.computed) return fail('export object must contain only plain non-computed properties');
+      if (p.kind !== 'init') return fail('getters/setters run on access - only plain properties allowed ("' + keyName(p) + '")');
       const v = p.value;
       const okValue = isLiteralish(v) || v.type === 'FunctionExpression' || v.type === 'ArrowFunctionExpression';
       if (!okValue) return fail('property "' + keyName(p) + '" is neither a literal nor a function (' + v.type + ') - it could execute at import');
