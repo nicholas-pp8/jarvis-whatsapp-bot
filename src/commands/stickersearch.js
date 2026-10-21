@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import config from '../config/config.js';
 import { featOn } from '../config/features.js';
 import { toSticker } from '../utils/imageTools.js';
+import { fetchPublic } from '../utilities/validation.js';
 
 const cache = new Map();
 
@@ -31,7 +32,9 @@ export default {
       }
       if (!list.urls.length) return ctx.reply('No GIFs found for that.');
       const mp4 = list.urls[Math.floor(Math.random() * list.urls.length)];
-      const buf = Buffer.from(await (await fetch(mp4, { signal: AbortSignal.timeout(30000) })).arrayBuffer());
+      const gr = await fetchPublic(mp4, { maxBytes: 15 * 1024 * 1024, timeoutMs: 30000 });
+      if (gr.status !== 200) throw new Error('GIF fetch HTTP ' + gr.status);
+      const buf = gr.body;
       const webp = await toSticker(buf, { animated: true });
       await ctx.sock.sendMessage(ctx.jid, { sticker: webp }, { quoted: ctx.msg });
     } catch (e) {

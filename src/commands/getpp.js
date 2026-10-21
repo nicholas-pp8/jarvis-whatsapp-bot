@@ -1,4 +1,5 @@
 import {replyFailure} from '../recovery/reply.js';
+import { fetchPublic } from '../utilities/validation.js';
 import { jidToNumber } from '../utils/helpers.js';
 import { quiet } from '../recover/index.js';
 import logger from '../utils/logger.js';
@@ -73,9 +74,9 @@ export default {
       return say('Could not read the profile picture right now. Try again in a minute.');
     }
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const buf = Buffer.from(await res.arrayBuffer());
+      const res = await fetchPublic(url, { maxBytes: 10 * 1024 * 1024, timeoutMs: 20000 });
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      const buf = res.body;
       logger.info(`[getpp] fetched ${buf.length} bytes, mode ${kind}`);
       if (!isImg(buf)) throw new Error('not an image');
       const caption = `Profile picture of ${label}${kind === 'preview' ? ' (low-res, full size unavailable)' : ''}`;

@@ -1,4 +1,5 @@
 import config from '../config/config.js';
+import { fetchPublic } from '../utilities/validation.js';
 import logger from '../utils/logger.js';
 import { parseNumber, searchLinks, carrierNote } from '../services/numberLookup.js';
 import { lookupPhone, formatPhoneInfo, phoneStatus, PhoneInfoError } from '../services/phoneInfo.js';
@@ -37,7 +38,7 @@ export default {
           out.push('', '🟢 On WhatsApp');
           const j = r[0].jid || jid;
           try { const st = await ctx.sock.fetchStatus(j); const about = st?.status?.status ?? st?.status ?? st?.[0]?.status?.status; if (about && typeof about === 'string') out.push(`About: ${about.slice(0, 200)}`); } catch { out.push('About: hidden or empty'); }
-          try { const u = await ctx.sock.profilePictureUrl(j, 'image', 15000); if (u) { const res = await fetch(u, { signal: AbortSignal.timeout(20000) }); if (res.ok) photo = Buffer.from(await res.arrayBuffer()); } } catch { /* no photo */ }
+          try { const u = await ctx.sock.profilePictureUrl(j, 'image', 15000); if (u) { const res = await fetchPublic(u, { maxBytes: 8 * 1024 * 1024, timeoutMs: 20000 }); if (res.status === 200) photo = res.body; } } catch { /* no photo */ }
           out.push(photo ? 'Profile photo: below' : 'Profile photo: none or hidden');
         } else out.push('', '⚪ Not on WhatsApp');
       } catch (e) { logger.info('[number] whatsapp check failed'); out.push('', 'WhatsApp check unavailable right now.'); }

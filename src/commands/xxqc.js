@@ -5,6 +5,7 @@ import { addStickerExif } from '../utils/imageTools.js';
 import { circleAvatar } from '../xxqc/engine.js';
 import { renderLiveSticker } from '../xxqc/wa.js';
 import { jidToNumber } from '../utils/helpers.js';
+import { fetchPublic } from '../utilities/validation.js';
 
 const rate = makeRate(6);
 const USAGE = 'Usage: xxqc Your text here\nExample: xxqc Stay hungry, stay foolish 🔥\nSends an animated live WhatsApp-chat sticker.\nReply to someone\'s message with xxqc to quote them.';
@@ -58,7 +59,7 @@ export default {
     try {
       let avatar = null;
       const jid = String(who || '').includes('@') ? who : `${String(who || '').replace(/\D/g, '')}@s.whatsapp.net`;
-      try { let url = null; for (const kind of ['image', 'preview']) { try { url = await ctx.sock.profilePictureUrl(jid, kind, 8000); if (url) break; } catch { /* try next size */ } } if (url) { const r = await fetch(url, { signal: AbortSignal.timeout(6000) }); if (r.ok) avatar = await circleAvatar(Buffer.from(await r.arrayBuffer())); } } catch { /* default avatar */ }
+      try { let url = null; for (const kind of ['image', 'preview']) { try { url = await ctx.sock.profilePictureUrl(jid, kind, 8000); if (url) break; } catch { /* try next size */ } } if (url) { const r = await fetchPublic(url, { maxBytes: 8 * 1024 * 1024, timeoutMs: 6000 }); if (r.status === 200) avatar = await circleAvatar(r.body); } } catch { /* default avatar */ }
       const digits = jid.endsWith('@lid') ? '' : String(jidToNumber(jid) || '').replace(/\D/g, '');
       const number = digits.length >= 7 && digits.length <= 15 ? digits : '';
       const cleanName = String(name || '').replace(/[\u0000-\u001F]/g, '').trim();

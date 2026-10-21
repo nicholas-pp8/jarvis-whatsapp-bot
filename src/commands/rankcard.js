@@ -1,4 +1,5 @@
 // RANKCARD: a clean rank card for the group XP system (5 xp per active minute).
+import { fetchPublic } from '../utilities/validation.js';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { featOn } from '../config/features.js';
@@ -27,7 +28,9 @@ export default {
       let avatar = `<circle cx="90" cy="110" r="55" fill="#3b3b55"/><text x="90" y="128" font-family="Helvetica, Arial, sans-serif" font-size="52" fill="#bbb" text-anchor="middle">${(name[0] || '?').toUpperCase()}</text>`;
       const purl = await ctx.sock.profilePictureUrl(target, 'image').catch(() => null);
       if (purl) {
-        const buf = Buffer.from(await (await fetch(purl, { signal: AbortSignal.timeout(10000) })).arrayBuffer());
+        const pr = await fetchPublic(purl, { maxBytes: 8 * 1024 * 1024, timeoutMs: 10000 });
+        if (pr.status !== 200) throw new Error('avatar HTTP ' + pr.status);
+        const buf = pr.body;
         const round = await sharp(buf).resize(110, 110).composite([{ input: Buffer.from('<svg><circle cx="55" cy="55" r="55"/></svg>'), blend: 'dest-in' }]).png().toBuffer();
         avatar = `<image href="data:image/png;base64,${round.toString('base64')}" x="35" y="55" width="110" height="110"/>`;
       }
