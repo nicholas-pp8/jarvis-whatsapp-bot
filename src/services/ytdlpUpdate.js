@@ -15,7 +15,9 @@ const run = (bin, args, timeoutMs) => new Promise((resolve) => {
 });
 export async function updateYtDlp({bin = config.tools.ytdlp, runner = run, log = logger} = {}) {
   try {
-    if (!bin || !path.isAbsolute(bin) || !bin.includes(`${path.sep}bin${path.sep}`)) { log.info('[ytdlp-update] skipped: yt-dlp is not the project binary'); return {skipped: true}; }
+    const resolved = path.resolve(bin || '');
+    const projectBin = path.join(config.root, 'bin') + path.sep;
+    if (!resolved.startsWith(projectBin)) { log.info('[ytdlp-update] skipped: yt-dlp is not the project binary'); return {skipped: true}; }
     const before = (await runner(bin, ['--version'], 20000)).out.trim().split('\n')[0];
     const r = await runner(bin, ['-U'], 90000);
     const after = (await runner(bin, ['--version'], 20000)).out.trim().split('\n')[0];

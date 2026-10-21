@@ -671,22 +671,30 @@ async function runInstallConfirmed(ctx, p) {
   }
   if (!code) { await rollback('codegen failed: ' + lastFail); return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Rolled back: package uninstalled, nothing added - try again or rephrase.'); }
   fs.writeFileSync(tmpFile, code);
-  // Self-test: usage path only, with FULLY MOCKED transport - the generated code
-  // cannot send real messages, and model-invented functional calls are never
-  // executed (they are not independent evidence and could carry real effects).
-  let selfTestNote = 'usage-path check passed (mocked transport; real output unproven until you run it)';
+  // Self-test: usage path only, in a SEPARATE permission-restricted Node process:
+  // fs writes confined to the temp dir, no child_process/worker/addons, transport
+  // fully mocked (nothing leaves the process). Network is NOT restricted there -
+  // the bodyProblem scan covers private/plain-http targets. Partial containment,
+  // not a sandbox; real output stays unproven until the owner runs the command.
+  let selfTestNote = 'usage-path check passed (restricted child process, mocked transport; real output unproven until you run it)';
   try {
-    const mod = await import('./' + path.basename(tmpFile) + '?t=' + Date.now());
-    const cmd = mod.default;
-    if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
-    if (cmd.minArgs !== 1) throw new Error('template minArgs changed');
-    const replies = [];
-    const sent = [];
-    const mockSock = { sendMessage: async (jid, payload) => { sent.push(String((payload && (payload.text || payload.caption)) || '').slice(0, 300)); return { key: {} }; }, updateMediaMessage: async () => ({}) };
-    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: ctx.commands, sock: mockSock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
-    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
-    for (const t of [...replies, ...sent]) if (t.includes('[object Object]')) throw new Error('a reply contained "[object Object]" (an object was rendered as text)');
-    if (!replies.length && !sent.length) throw new Error('usage path produced no reply at all');
+    const childFile = path.join('src', 'commands', '_selftest-child.mjs');
+    const root = process.cwd();
+    const stmp = fs.mkdtempSync(path.join(os.tmpdir(), 'selftest-'));
+    const allow = '--allow-fs-read=' + JSON.stringify(path.join(root, 'src')) + ' --allow-fs-read=' + JSON.stringify(path.join(root, 'node_modules')) + ' --allow-fs-read=' + JSON.stringify(stmp) + ' --allow-fs-write=' + JSON.stringify(stmp);
+    let r;
+    try {
+      r = await shell.execShell('node --experimental-permission ' + allow + ' ' + JSON.stringify(childFile) + ' ' + JSON.stringify(path.resolve(tmpFile)), { timeoutMs: 45000 });
+    } finally {
+      try { fs.rmSync(stmp, { recursive: true, force: true }); } catch {}
+    }
+    const line = String(r.out || '').split('\n').find((l) => l.startsWith('SELFTEST_JSON:'));
+    if (!line) throw new Error('self-test runner gave no result (' + String(r.out || 'exit ' + r.code).slice(-120).replace(/\n/g, ' ') + ')');
+    const res = JSON.parse(line.slice('SELFTEST_JSON:'.length));
+    if (!res.ok) throw new Error(String(res.error || 'unknown').slice(0, 150));
+    const texts = [...(res.replies || []), ...(res.sent || [])];
+    for (const t of texts) if (t.includes('[object Object]')) throw new Error('a reply contained "[object Object]" (an object was rendered as text)');
+    if (!texts.length) throw new Error('usage path produced no reply at all');
     shell.audit('INSTALL self-test passed for /' + cmdName + ': ' + selfTestNote);
   } catch (e) {
     await shell.execShell('npm uninstall ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 180000 });
