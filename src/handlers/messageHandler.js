@@ -197,7 +197,7 @@ const text = extractText(msg.message);
     if (text && !msg.key.fromMe) {
       try {
         const sessions = await import('../utils/sessions.js');
-        if (sessions.has(msg.key.remoteJid) && await sessions.route(sock, msg, text)) return;
+        if (sessions.has(msg.key.remoteJid, msg.key.participant || msg.key.remoteJid) && await sessions.route(sock, msg, text)) return;
       } catch { /* sessions never block normal messages */ }
     }
     let parsed = parseCommand(text);

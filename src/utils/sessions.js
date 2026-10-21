@@ -6,7 +6,10 @@
 import fs from 'node:fs';
 
 const FILE = 'data/sessions.json';
-const sessions = new Map(); // jid -> { cmd, onText, handlerKey, state, expiresAt }
+const sessions = new Map(); // key -> { cmd, onText, handlerKey, state, expiresAt }
+// Key = chat + sender: a session belongs to the person who started it, so in
+// groups another member's messages can never feed someone else's session.
+function key(jid, senderJid) { return senderJid ? jid + '::' + senderJid : jid; }
 const handlers = new Map(); // handlerKey -> onText(sctx, text, end)
 let loaded = false;
 
@@ -17,7 +20,7 @@ function persist() {
   try {
     const arr = [...sessions.entries()]
       .filter(([, s]) => s.handlerKey)
-      .map(([jid, s]) => ({ jid, cmd: s.cmd, handlerKey: s.handlerKey, state: s.state, expiresAt: s.expiresAt }));
+      .map(([k, s]) => ({ jid: k, cmd: s.cmd, handlerKey: s.handlerKey, state: s.state, expiresAt: s.expiresAt }));
     fs.mkdirSync('data', { recursive: true });
     fs.writeFileSync(FILE + '.tmp', JSON.stringify(arr));
     fs.renameSync(FILE + '.tmp', FILE);
@@ -45,30 +48,34 @@ export function begin(ctx, { cmd, ttlMs = 5 * 60e3, state = {}, onText, handlerK
   let fn = onText;
   if (!fn && handlerKey) fn = handlers.get(handlerKey);
   if (typeof fn !== 'function') return false;
-  sessions.set(ctx.jid, { cmd, onText: fn, handlerKey: handlerKey || null, state, expiresAt: Date.now() + ttlMs });
+  sessions.set(key(ctx.jid, ctx.senderJid || ctx.sender), { cmd, onText: fn, handlerKey: handlerKey || null, state, expiresAt: Date.now() + ttlMs });
   persist();
   return true;
 }
-export function has(jid) {
+export function has(jid, senderJid) {
   load();
-  const s = sessions.get(jid);
+  const k = key(jid, senderJid);
+  const s = sessions.get(k);
   if (!s) return false;
-  if (Date.now() > s.expiresAt) { sessions.delete(jid); persist(); return false; }
+  if (Date.now() > s.expiresAt) { sessions.delete(k); persist(); return false; }
   return true;
 }
-export function end(jid) { load(); sessions.delete(jid); persist(); }
+export function end(jid, senderJid) { load(); sessions.delete(key(jid, senderJid)); persist(); }
 /** Route one plain message into the active session. Returns true if consumed. */
 export async function route(sock, msg, text) {
   load();
   const jid = msg.key.remoteJid;
-  const s = sessions.get(jid);
+  const senderJid = msg.key.participant || jid;
+  let k = key(jid, senderJid);
+  let s = sessions.get(k);
+  if (!s && !jid.endsWith('@g.us') && sessions.has(jid)) { k = jid; s = sessions.get(jid); } // legacy pre-key DM entries
   if (!s) return false;
-  if (Date.now() > s.expiresAt) { sessions.delete(jid); persist(); return false; }
+  if (Date.now() > s.expiresAt) { sessions.delete(k); persist(); return false; }
   const sctx = {
     sock, jid, state: s.state,
     reply: (t, o) => sock.sendMessage(jid, { text: t, ...(o || {}) }, { quoted: msg }),
   };
-  try { await s.onText(sctx, text, () => { sessions.delete(jid); }); } catch { sessions.delete(jid); }
+  try { await s.onText(sctx, text, () => { sessions.delete(k); }); } catch { sessions.delete(k); }
   persist();
   return true;
 }
