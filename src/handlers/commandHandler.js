@@ -6,6 +6,7 @@ import {t} from '../i18n/index.js';import {replyFailure} from '../recovery/reply
 import {permitted,fullAccess} from '../permissions/index.js';
 import {commandOn} from '../auth/features.js';
 import {directiveBlock} from '../telemetry/enforce.js';
+import {fetchPublic} from '../utilities/validation.js';
 import {ownerGate} from '../auth/gate.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -159,7 +160,7 @@ export async function handleCommand(ctx, parsed) {
   }
 
   if(['Utilities','Games','Permissions'].includes(cmd.category)){const key=ctx.sender;const prev=utilityUse.get(key)||0;if(now-prev<3000)return ctx.reply(t(ctx,'cooldown',{seconds:3}));utilityUse.set(key,now);if(utilityUse.size>5000)utilityUse.clear();}
-  ctx.args = parsed.args; ctx.commandName = parsed.name;
+  ctx.args = parsed.args; ctx.commandName = parsed.name; ctx.fetchPublic = fetchPublic; // guarded public fetch for fixed + generated commands
   if ((cmd.minArgs || 0) > ctx.args.length) {
     return ctx.reply(t(ctx,'missing_input',{usage:t(ctx,'usage'),prefix:config.prefix,command:cmd.usage}));
   }

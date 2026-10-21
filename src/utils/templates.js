@@ -38,11 +38,10 @@ try {
     body: `const url = ctx.args[0] || '';
 if (!/^https:\\/\\//i.test(url)) { await ctx.reply('Usage: /CMDNAME <https URL of a public JSON API>'); return; }
 try {
-  const host = new URL(url).hostname.toLowerCase();
-  if (/^(localhost|127\\.|10\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.|0\\.)/.test(host) || host.endsWith('.local') || host.endsWith('.internal')) throw new Error('that address range is not allowed');
-  const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
-  if (!r.ok) throw new Error('API returned HTTP ' + r.status);
-  const text = await r.text();
+  if (typeof ctx.fetchPublic !== 'function') throw new Error('safe fetch is unavailable in this build');
+  const r = await ctx.fetchPublic(url, { maxBytes: 1048576, headers: { accept: 'application/json' } });
+  if (r.status < 200 || r.status >= 300) throw new Error('API returned HTTP ' + r.status);
+  const text = r.body.toString('utf8');
   let pretty = text;
   try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch {}
   await ctx.reply(pretty.slice(0, 3000) || '(empty response)');
