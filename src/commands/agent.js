@@ -470,62 +470,63 @@ async function npmSearchCandidates(goal, excludePkg) {
   } catch { return []; }
 }
 
-// ---- Isolated pre-install probe -------------------------------------------
-// Test-installs the package in a throwaway folder with install scripts DISABLED
-// and a scrubbed environment (no bot env vars, no access to bot files), then
-// imports its entry points. The package's own top-level code DOES run during the
-// import - containment is the empty env + throwaway cwd + no scripts, not a VM.
-async function sandboxInstallProbe(pkg, version) {
-  let tmp;
-  try { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-probe-')); }
-  catch (e) { shell.audit('SANDBOX PROBE skipped: ' + String(e?.message || e).slice(0, 80)); return null; }
-  const envP = 'env -i PATH=' + JSON.stringify(path.dirname(process.execPath) + ':/usr/local/bin:/usr/bin:/bin') + ' HOME=' + JSON.stringify(tmp) + ' ';
-  const spec = pkg + (version ? '@' + version : '');
+// ---- Static pre-install inspection (NO package code execution) -----------
+// Reads registry metadata and walks the tarball's file list + package.json only.
+// Never installs, imports or runs anything from the package before the real
+// owner-confirmed npm install. Catches deprecations and surprises (install
+// scripts, huge/binary payloads); the post-install import probe + rollback
+// remains the backstop for broken publications.
+async function staticPkgInspect(pkg, version) {
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), 12000);
   try {
-    const inst = await shell.execShell(envP + 'npm install --prefix ' + JSON.stringify(tmp) + ' ' + JSON.stringify(spec) + ' --ignore-scripts --no-audit --no-fund --loglevel=error', { timeoutMs: 180000 });
-    if (inst.code !== 0) return { ok: false, why: 'could not install ' + spec + ' even in an isolated folder (' + String(inst.out || 'exit ' + inst.code).slice(-160).replace(/\n/g, ' ') + ')' };
-    const probeScript = "const { createRequire } = await import('node:module');"
-      + "const req = createRequire(process.cwd() + '/x.js');"
-      + "let specs = [];"
-      + "try { const pj = req('./node_modules/' + process.argv[1] + '/package.json');"
-      + " specs = Object.keys(pj.exports || {}).filter(k => k !== './package.json' && !/nsfw/i.test(k)).map(k => k === '.' ? process.argv[1] : process.argv[1] + '/' + k.slice(2)); } catch {}"
-      + "if (!specs.includes(process.argv[1])) specs.unshift(process.argv[1]);"
-      + "const out = {};"
-      + "for (const s of specs.slice(0, 8)) {"
-      + " try { const m = await import(s); out[s] = { keys: Object.keys(m).slice(0, 25), hasDefault: !!m.default }; }"
-      + " catch (e) { out[s] = { probeError: String(e.message || e).slice(0, 120) }; }"
-      + "}"
-      + "console.log(JSON.stringify(out));";
-    const r = await shell.execShell('cd ' + JSON.stringify(tmp) + ' && ' + envP + 'node --input-type=module -e "' + probeScript + '" ' + JSON.stringify(pkg), { timeoutMs: 60000 });
-    let exp = {};
-    try { exp = JSON.parse((r.out || '').trim().split('\n').pop()); } catch {}
-    shell.audit('SANDBOX PROBE ' + spec + ': ' + JSON.stringify(exp).slice(0, 160));
-    if (Object.keys(exp).length && !Object.entries(exp).some(([, v]) => v && !v.probeError)) {
-      const first = Object.entries(exp)[0];
-      return { ok: false, why: spec + ' installs but cannot be imported (' + (first ? first[0] + ' -> ' + (first[1].probeError || '?') : 'probe failed') + '). Broken package publication.' };
+    const metaR = await fetch('https://registry.npmjs.org/' + encodeURIComponent(pkg).replace(/%40/, '@').replace(/%2F/i, '/') + '/' + (version || 'latest'), { signal: ctl.signal });
+    if (!metaR.ok) return { inconclusive: true, why: 'registry metadata unreadable (HTTP ' + metaR.status + ')' };
+    const doc = await metaR.json();
+    if (doc.deprecated) return { blocked: true, why: pkg + (version ? '@' + version : '') + ' is DEPRECATED on npm: "' + String(doc.deprecated).slice(0, 120) + '".' };
+    const tarUrl = doc.dist && doc.dist.tarball;
+    if (!tarUrl) return { inconclusive: true, why: 'no tarball URL in registry metadata' };
+    const tarR = await fetch(tarUrl, { signal: ctl.signal });
+    if (!tarR.ok) return { inconclusive: true, why: 'tarball unreadable (HTTP ' + tarR.status + ')' };
+    const buf = new Uint8Array(await tarR.arrayBuffer());
+    if (buf.length > 30 * 1048576) return { inconclusive: true, why: 'tarball over 30MB (' + Math.round(buf.length / 1048576) + 'MB) - inspect manually' };
+    // gunzip (npm tarballs are .tgz); if not gzipped, walk as plain tar
+    let tar = buf;
+    if (buf[0] === 0x1f && buf[1] === 0x8b) {
+      const { gunzipSync } = await import('node:zlib');
+      tar = gunzipSync(buf);
     }
-    if (!Object.keys(exp).length) return { ok: true, inconclusive: true };
-    return { ok: true };
+    // Minimal tar walk: 512-byte headers, name@0..100, size(octal)@124..136
+    const files = [];
+    let pkgJson = null;
+    let off = 0;
+    const dec = new TextDecoder();
+    while (off + 512 <= tar.length && files.length < 4000) {
+      const name = dec.decode(tar.subarray(off, off + 100)).replace(/\0.*$/, '');
+      if (!name) break;
+      const sizeOct = dec.decode(tar.subarray(off + 124, off + 136)).replace(/\0.*$/, '').trim();
+      const size = parseInt(sizeOct || '0', 8) || 0;
+      files.push(name);
+      if (/package\.json$/.test(name) && !pkgJson && size < 200000) {
+        try { pkgJson = JSON.parse(dec.decode(tar.subarray(off + 512, off + 512 + size))); } catch {}
+      }
+      off += 512 + Math.ceil(size / 512) * 512;
+    }
+    const scripts = (pkgJson && pkgJson.scripts) || {};
+    const lifecycle = ['preinstall', 'install', 'postinstall', 'prepublish', 'prepare'].filter((k) => scripts[k]);
+    shell.audit('STATIC INSPECT ' + pkg + ': ' + files.length + ' files, lifecycle scripts: ' + (lifecycle.join(',') || 'none'));
+    return {
+      ok: true,
+      fileCount: files.length,
+      lifecycle,
+      hasBinary: files.some((f) => /\.(node|so|dll|dylib|exe)$/.test(f)),
+      unpackedSize: doc.dist.unpackedSize || null,
+    };
   } catch (e) {
-    shell.audit('SANDBOX PROBE error: ' + String(e?.message || e).slice(0, 120));
-    return null;
-  } finally {
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
-  }
+    return { inconclusive: true, why: String(e?.message || e).slice(0, 120) };
+  } finally { clearTimeout(to); }
 }
 
-// ---- Self-test spec (deterministic functional check for generated code) ----
-export function sanitizeSelfTestSpec(raw) {
-  let j;
-  try { j = JSON.parse(String(raw || '').replace(/```json|```/g, '').trim()); } catch { return null; }
-  if (!j || j.none) return null;
-  if (!Array.isArray(j.args) || j.args.length > 6) return null;
-  const args = j.args.map((a) => String(a).slice(0, 40));
-  const expect = String(j.expect || '').slice(0, 160);
-  if (!expect) return null;
-  try { new RegExp(expect, 'i'); } catch { return null; }
-  return { args, expect };
-}
 async function runInstallFlow(ctx, goal) {
   const parsed = parseInstallGoal(goal);
   if (!parsed) return ctx.reply('Tell me the package, e.g. "/agent install mathjs make a calc command".');
@@ -565,7 +566,7 @@ async function runInstallFlow(ctx, goal) {
   const mismatchNote = goalToks.size && !hit
     ? '\nNote: you forced this past a vocabulary mismatch - npm describes "' + pkg + '" as "' + String(meta.description || 'no description').slice(0, 100) + '".'
     : '';
-  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). An isolated pre-install probe runs first; after a self-test passes, Jarvis restarts and /' + cmdName + ' is live.' + mismatchNote + '\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). A static pre-check (no package code run) plus the post-install import probe protect it; after a self-test passes, Jarvis restarts and /' + cmdName + ' is live.' + mismatchNote + '\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
 }
 async function probeExports(pkg) {
   const script = "const { createRequire } = await import('node:module');"
@@ -620,11 +621,12 @@ async function runInstallConfirmed(ctx, p) {
   const mb = await shell.backupManifests();
   if (!mb) return ctx.reply('Aborted - could not back up package.json/package-lock.json first. Nothing was changed.');
   shell.audit('INSTALL ' + pkg + ' manifest backup: ' + mb);
-  const probe = await sandboxInstallProbe(pkg, version);
-  if (probe && probe.ok === false) {
-    return ctx.reply('Pre-check failed: ' + probe.why + ' Nothing was installed - manifests untouched. Try a different package/version or ask me to hand-write the command.');
+  const insp = await staticPkgInspect(pkg, version);
+  if (insp && insp.blocked) {
+    return ctx.reply('Pre-check failed: ' + insp.why + ' Nothing was installed - manifests untouched. Try a different package/version or ask me to hand-write the command.');
   }
-  if (probe && probe.ok === true && !probe.inconclusive) await ctx.reply('Pre-check passed: ' + pkg + ' installed and imported in an isolated throwaway folder (install scripts disabled, scrubbed environment, no access to bot files/secrets). Installing for real now...');
+  if (insp && insp.ok) await ctx.reply('Static pre-check (no package code executed): ' + insp.fileCount + ' files' + (insp.lifecycle.length ? ', HAS install scripts (' + insp.lifecycle.join(', ') + ') - these run during npm install' : ', no install scripts') + (insp.hasBinary ? ', contains native binaries' : '') + '. Installing for real now...');
+  if (insp && insp.inconclusive) await ctx.reply('Static pre-check inconclusive (' + insp.why + '). The post-install import probe and rollback still protect you. Installing...');
   const inst = await shell.execShell('npm install ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 240000 });
   shell.audit('INSTALL ' + pkg + ' -> exit ' + inst.code);
   if (inst.code !== 0) return ctx.reply('npm install failed, nothing was added:\n' + String(inst.out || '').slice(-400));
@@ -669,33 +671,22 @@ async function runInstallConfirmed(ctx, p) {
   }
   if (!code) { await rollback('codegen failed: ' + lastFail); return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Rolled back: package uninstalled, nothing added - try again or rephrase.'); }
   fs.writeFileSync(tmpFile, code);
-  // Ask codegen for ONE deterministic functional test spec; sanitize before trusting it.
-  let spec = null;
-  try {
-    const sr = await ai('Here is a WhatsApp bot command body for /' + cmdName + ' using package ' + pkg + ':\n' + code.slice(0, 3000) + '\nInvent ONE harmless deterministic test call. Reply with ONLY JSON: {"args":["word1"],"expect":"<javascript regex source a correct ctx.reply text must match>"}. The test MUST NOT use the network, files, dates or randomness, and must not send anything; it must finish in under 5 seconds. If the command inherently needs network/files/media, reply {"none":true}.', { temperature: 0 }, 'codegen');
-    spec = sanitizeSelfTestSpec(String(sr && sr.text || ''));
-  } catch { spec = null; }
-  let selfTestNote = 'usage-path check passed (no deterministic functional test applicable; real output unproven until you run it)';
+  // Self-test: usage path only, with FULLY MOCKED transport - the generated code
+  // cannot send real messages, and model-invented functional calls are never
+  // executed (they are not independent evidence and could carry real effects).
+  let selfTestNote = 'usage-path check passed (mocked transport; real output unproven until you run it)';
   try {
     const mod = await import('./' + path.basename(tmpFile) + '?t=' + Date.now());
     const cmd = mod.default;
     if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
     if (cmd.minArgs !== 1) throw new Error('template minArgs changed');
-    const runOnce = async (args) => {
-      const replies = [];
-      const mockCtx = { args, sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: ctx.commands, sock: ctx.sock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
-      await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
-      for (const t of replies) if (t.includes('[object Object]')) throw new Error('a reply contained "[object Object]" (an object was rendered as text)');
-      return replies;
-    };
-    const usageReplies = await runOnce([]);
-    if (!usageReplies.length) throw new Error('usage path produced no reply at all');
-    if (spec) {
-      const fr = await runOnce(spec.args);
-      const re = new RegExp(spec.expect, 'i');
-      if (!fr.some((t) => re.test(t))) throw new Error('functional check failed: expected a reply matching /' + spec.expect + '/i, got: ' + (fr.join(' | ') || '(no reply)').slice(0, 120));
-      selfTestNote = 'functional check passed (args [' + spec.args.join(', ') + '] -> reply matched /' + spec.expect + '/i)';
-    }
+    const replies = [];
+    const sent = [];
+    const mockSock = { sendMessage: async (jid, payload) => { sent.push(String((payload && (payload.text || payload.caption)) || '').slice(0, 300)); return { key: {} }; }, updateMediaMessage: async () => ({}) };
+    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: ctx.commands, sock: mockSock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
+    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
+    for (const t of [...replies, ...sent]) if (t.includes('[object Object]')) throw new Error('a reply contained "[object Object]" (an object was rendered as text)');
+    if (!replies.length && !sent.length) throw new Error('usage path produced no reply at all');
     shell.audit('INSTALL self-test passed for /' + cmdName + ': ' + selfTestNote);
   } catch (e) {
     await shell.execShell('npm uninstall ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 180000 });
