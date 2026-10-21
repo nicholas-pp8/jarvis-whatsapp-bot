@@ -24,6 +24,9 @@ import { loadGenerated, saveGenerated, noteGenerated, dropGenerated, getGenerate
 import { pickTemplate } from '../utils/templates.js';
 import { buildKit, unpackKit } from '../utils/recovery.js';
 import * as sessions from '../utils/sessions.js';
+import os from 'node:os';
+import { findMedia } from '../utils/imageTools.js';
+import { runEnhance } from './_enhance.js';
 
 const SAFE = ['weather', 'news', 'ask', 'define', 'translate', 'wiki', 'time', 'stock', 'quote', 'lyrics'];
 
@@ -265,6 +268,7 @@ export async function handlePendingAnswer(ctx, isYes) {
   }
   shell.clearPending();
   if (p.kind === 'install') return runInstallConfirmed(ctx, p);
+  if (p.kind === 'mediavision') return runMediaVisionConfirmed(ctx, p);
   if (p.kind === 'update') return runUpdateConfirmed(ctx, p);
   if (p.kind === 'msgjob') return runMessageJobConfirmed(ctx, p);
   if (p.kind === 'template') return runTemplateConfirmed(ctx, p);
@@ -373,10 +377,154 @@ function parseUpdateGoal(goal) {
   if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(pkg)) return null;
   return { pkg };
 }
-const INSTALL_GOAL_STOP = new Set(['install', 'make', 'add', 'create', 'command', 'cmd', 'new', 'the', 'and', 'for', 'with', 'use', 'using', 'please', 'that', 'this', 'bot', 'jarvis', 'like', 'app', 'me']);
+const INSTALL_GOAL_STOP = new Set(['install', 'make', 'add', 'create', 'command', 'cmd', 'new', 'the', 'and', 'for', 'with', 'use', 'using', 'please', 'that', 'this', 'bot', 'jarvis', 'like', 'app', 'me', 'force']);
 export function installGoalTokens(goal, pkg) {
   const base = String(pkg || '').toLowerCase().replace(/^@[^/]+\//, '');
   return new Set(String(goal || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((t) => t.length > 2 && !INSTALL_GOAL_STOP.has(t) && t !== base));
+}
+
+// ---- System status (deterministic, read-only) -----------------------------
+export function isSystemStatusGoal(goal) {
+  const g = String(goal || '').trim();
+  if (!g) return false;
+  if (/\b(clean|clear|delete|remove|wipe|free up|install|update|upgrade|download|restart|kill|fix|repair|add|create|make|send)\b/i.test(g)) return false;
+  if (/how\s+long.*(running|up\b)/i.test(g)) return true;
+  if (!/\b(disk|storage|space|memory|ram|uptime|cpu|load)\b/i.test(g)) return false;
+  return /(available|free|used|total|left|remain|usage|how much|how many|status|current|check|show|what|is there|\?)/i.test(g);
+}
+async function runSystemStatus(ctx) {
+  const lines = [];
+  try {
+    const sf = fs.statfsSync('.');
+    const total = sf.blocks * sf.bsize, free = sf.bavail * sf.bsize, used = total - free;
+    lines.push('Disk (container filesystem): ' + fmtMB(free) + ' free of ' + fmtMB(total) + ' total (' + fmtMB(used) + ' used).');
+    lines.push('Note: the hosting panel may display its disk quota as Unlimited - that is only the panel setting; the filesystem numbers above are the real ones.');
+  } catch (e) {
+    lines.push('Disk: could not read the filesystem (' + String(e?.message || e).slice(0, 80) + ').');
+  }
+  lines.push('Jarvis memory in use (RSS): ' + fmtMB(process.memoryUsage().rss) + '.');
+  const up = Math.floor(process.uptime());
+  lines.push('Jarvis uptime: ' + Math.floor(up / 3600) + 'h ' + Math.floor((up % 3600) / 60) + 'm (since last restart).');
+  shell.audit('SYSTEM STATUS read (disk/mem/uptime)');
+  return ctx.reply(lines.join('\n'));
+}
+
+// ---- Media-aware goals (photo in the command message or quoted) -----------
+export function mediaGoalRoute(goal) {
+  const g = String(goal || '').trim();
+  if (!g) return { kind: 'usage' };
+  if (/\b(install|update|upgrade|delete|remove|clean|download|schedule|undo|retry|restore)\b/i.test(g)) return null;
+  if (/\b(enhance|upscale|remini|sharpen|denoise|deblur|clearer|hd)\b|improve (the |this |that )?(photo|pic|image)|fix (the |this |that )?(photo|pic|image)/i.test(g)) {
+    const mode = /sharpen/i.test(g) ? 'sharpen' : (/denoise|deblur/i.test(g) ? 'denoise' : 'upscale');
+    return { kind: 'enhance', mode };
+  }
+  if (/\b(what|who|describe|read|text|say|says|written|ocr|translate|identify|count|tell me about|mean|is there|are there)\b/i.test(g)) {
+    return { kind: 'vision', question: g.slice(0, 300) };
+  }
+  return null;
+}
+async function runMediaVisionConfirmed(ctx, p) {
+  const mv = p.mediavision || {};
+  if (!mv.question || !mv.msg) return ctx.reply('That confirmation expired - send the photo and question again.');
+  const vcmd = registry.get('vision');
+  if (!vcmd) return ctx.reply('The vision command is not available right now.');
+  shell.audit('MEDIA GOAL vision CONFIRMED - photo sent to vision provider after explicit YES');
+  try {
+    await vcmd.run({ ...ctx, msg: mv.msg, args: String(mv.question).split(/\s+/).slice(0, 60) });
+  } catch (e) {
+    logger.warn('[agent] media vision failed: ' + (e?.message || 'error'));
+    await ctx.reply('Could not read that photo (' + String(e?.message || 'error').slice(0, 100) + ').');
+  }
+  return true;
+}
+
+// ---- npm candidate search (free registry API; user always picks) ----------
+const ADULT_PKG = /xvideos|xnxx|porn|nsfw|xxx|hentai|redtube|youporn|adult|erotic/i;
+export function filterPkgCandidates(objects, goalToks, excludePkg) {
+  const scored = [];
+  for (const o of objects || []) {
+    const p = o && o.package;
+    if (!p || !p.name) continue;
+    const text = (p.name + ' ' + (p.description || '') + ' ' + (p.keywords || []).join(' ')).toLowerCase();
+    if (ADULT_PKG.test(text)) continue;
+    if (p.name.toLowerCase() === String(excludePkg || '').toLowerCase()) continue;
+    const toks = new Set(text.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((t) => t.length > 2));
+    let score = 0;
+    for (const t of goalToks) if (toks.has(t)) score++;
+    if (score > 0) scored.push({ name: p.name, desc: String(p.description || '').slice(0, 90), score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3);
+}
+async function npmSearchCandidates(goal, excludePkg) {
+  const toks = [...installGoalTokens(goal, excludePkg)].slice(0, 4);
+  if (!toks.length) return [];
+  try {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch('https://registry.npmjs.org/-/v1/search?text=' + encodeURIComponent(toks.join(' ')) + '&size=6', { signal: ctl.signal });
+    clearTimeout(to);
+    if (!r.ok) return [];
+    const j = await r.json();
+    return filterPkgCandidates(j.objects, installGoalTokens(goal, excludePkg), excludePkg);
+  } catch { return []; }
+}
+
+// ---- Isolated pre-install probe -------------------------------------------
+// Test-installs the package in a throwaway folder with install scripts DISABLED
+// and a scrubbed environment (no bot env vars, no access to bot files), then
+// imports its entry points. The package's own top-level code DOES run during the
+// import - containment is the empty env + throwaway cwd + no scripts, not a VM.
+async function sandboxInstallProbe(pkg, version) {
+  let tmp;
+  try { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-probe-')); }
+  catch (e) { shell.audit('SANDBOX PROBE skipped: ' + String(e?.message || e).slice(0, 80)); return null; }
+  const envP = 'env -i PATH=' + JSON.stringify(path.dirname(process.execPath) + ':/usr/local/bin:/usr/bin:/bin') + ' HOME=' + JSON.stringify(tmp) + ' ';
+  const spec = pkg + (version ? '@' + version : '');
+  try {
+    const inst = await shell.execShell(envP + 'npm install --prefix ' + JSON.stringify(tmp) + ' ' + JSON.stringify(spec) + ' --ignore-scripts --no-audit --no-fund --loglevel=error', { timeoutMs: 180000 });
+    if (inst.code !== 0) return { ok: false, why: 'could not install ' + spec + ' even in an isolated folder (' + String(inst.out || 'exit ' + inst.code).slice(-160).replace(/\n/g, ' ') + ')' };
+    const probeScript = "const { createRequire } = await import('node:module');"
+      + "const req = createRequire(process.cwd() + '/x.js');"
+      + "let specs = [];"
+      + "try { const pj = req('./node_modules/' + process.argv[1] + '/package.json');"
+      + " specs = Object.keys(pj.exports || {}).filter(k => k !== './package.json' && !/nsfw/i.test(k)).map(k => k === '.' ? process.argv[1] : process.argv[1] + '/' + k.slice(2)); } catch {}"
+      + "if (!specs.includes(process.argv[1])) specs.unshift(process.argv[1]);"
+      + "const out = {};"
+      + "for (const s of specs.slice(0, 8)) {"
+      + " try { const m = await import(s); out[s] = { keys: Object.keys(m).slice(0, 25), hasDefault: !!m.default }; }"
+      + " catch (e) { out[s] = { probeError: String(e.message || e).slice(0, 120) }; }"
+      + "}"
+      + "console.log(JSON.stringify(out));";
+    const r = await shell.execShell('cd ' + JSON.stringify(tmp) + ' && ' + envP + 'node --input-type=module -e "' + probeScript + '" ' + JSON.stringify(pkg), { timeoutMs: 60000 });
+    let exp = {};
+    try { exp = JSON.parse((r.out || '').trim().split('\n').pop()); } catch {}
+    shell.audit('SANDBOX PROBE ' + spec + ': ' + JSON.stringify(exp).slice(0, 160));
+    if (Object.keys(exp).length && !Object.entries(exp).some(([, v]) => v && !v.probeError)) {
+      const first = Object.entries(exp)[0];
+      return { ok: false, why: spec + ' installs but cannot be imported (' + (first ? first[0] + ' -> ' + (first[1].probeError || '?') : 'probe failed') + '). Broken package publication.' };
+    }
+    if (!Object.keys(exp).length) return { ok: true, inconclusive: true };
+    return { ok: true };
+  } catch (e) {
+    shell.audit('SANDBOX PROBE error: ' + String(e?.message || e).slice(0, 120));
+    return null;
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+  }
+}
+
+// ---- Self-test spec (deterministic functional check for generated code) ----
+export function sanitizeSelfTestSpec(raw) {
+  let j;
+  try { j = JSON.parse(String(raw || '').replace(/```json|```/g, '').trim()); } catch { return null; }
+  if (!j || j.none) return null;
+  if (!Array.isArray(j.args) || j.args.length > 6) return null;
+  const args = j.args.map((a) => String(a).slice(0, 40));
+  const expect = String(j.expect || '').slice(0, 160);
+  if (!expect) return null;
+  try { new RegExp(expect, 'i'); } catch { return null; }
+  return { args, expect };
 }
 async function runInstallFlow(ctx, goal) {
   const parsed = parseInstallGoal(goal);
@@ -392,17 +540,32 @@ async function runInstallFlow(ctx, goal) {
   }
   let cmdName = parsed.cmdName || pkg.replace(/^@[^/]+\//, '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 15);
   if (registry.get(cmdName)) return ctx.reply('/' + cmdName + ' already exists - pick another command name, e.g. "/agent install ' + pkg + ' make a ' + cmdName + '2 command".');
-  shell.stage([], { kind: 'install', install: { pkg, version: meta.version, cmdName, desc: String(meta.description || '').slice(0, 150), finalFile: path.join('src', 'commands', cmdName + '.js') } });
-  shell.audit('INSTALL STAGED ' + pkg + '@' + meta.version + ' as /' + cmdName);
-  // Qualify the package against the stated goal: warn when the npm description/keywords
-  // share no vocabulary with the request (brand names often map to unrelated packages).
+  // Qualify the package against the stated goal: when the npm description/keywords share
+  // NO vocabulary with the request, do NOT stage a YES-able plan - a reflexive YES is how
+  // the wrong "remini" (React state lib) got installed for a photo-enhance goal. Show real
+  // alternatives from npm search and require a deliberate "force" to override.
+  const force = /\bforce\b/i.test(goal);
   const goalToks = installGoalTokens(goal, pkg);
   const descToks = new Set((String(meta.description || '') + ' ' + (meta.keywords || []).join(' ')).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((t) => t.length > 2));
   const hit = [...goalToks].some((t) => descToks.has(t) || (t.length > 4 && [...descToks].some((d) => d.startsWith(t) || t.startsWith(d))));
+  if (goalToks.size && !hit && !force) {
+    const cands = await npmSearchCandidates(goal, pkg);
+    shell.audit('INSTALL BLOCKED mismatch ' + pkg + ' (goal tokens: ' + [...goalToks].slice(0, 6).join(',') + ')');
+    const lines = ['Hold on - npm describes "' + pkg + '" as "' + String(meta.description || 'no description').slice(0, 100) + '", which shares nothing with what you asked (' + [...goalToks].slice(0, 6).join(', ') + '). Brand names are often unrelated packages, so I did NOT stage this install.'];
+    if (cands.length) {
+      lines.push('Closer matches on npm for your goal:\n' + cands.map((c) => '- ' + c.name + (c.desc ? ': ' + c.desc : '')).join('\n') + '\nYou pick - I never swap packages silently. Say e.g. "/agent install ' + cands[0].name + '" to use one.');
+    } else {
+      lines.push('npm search found no closer match either - this may need a hand-written command or an existing Jarvis feature instead.');
+    }
+    lines.push('If you are sure "' + pkg + '" is really what you want, say "/agent install ' + pkg + ' force' + (parsed.cmdName ? ' make a ' + parsed.cmdName + ' command' : '') + '".');
+    return ctx.reply(lines.join('\n'));
+  }
+  shell.stage([], { kind: 'install', install: { pkg, version: meta.version, cmdName, desc: String(meta.description || '').slice(0, 150), finalFile: path.join('src', 'commands', cmdName + '.js') } });
+  shell.audit('INSTALL STAGED ' + pkg + '@' + meta.version + ' as /' + cmdName + (force ? ' (FORCED by owner despite mismatch)' : ''));
   const mismatchNote = goalToks.size && !hit
-    ? '\nWarning: npm describes "' + pkg + '" as "' + String(meta.description || 'no description').slice(0, 100) + '" - that does not obviously match what you asked for. Brand names are often unrelated npm packages. Reply YES only if this is really the package you meant.'
+    ? '\nNote: you forced this past a vocabulary mismatch - npm describes "' + pkg + '" as "' + String(meta.description || 'no description').slice(0, 100) + '".'
     : '';
-  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). After a self-test passes, Jarvis restarts and /' + cmdName + ' is live.' + mismatchNote + '\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
+  return ctx.reply('Plan: install ' + pkg + ' v' + meta.version + ' and add a new /' + cmdName + ' command (' + String(meta.description || 'no description').slice(0, 120) + '). An isolated pre-install probe runs first; after a self-test passes, Jarvis restarts and /' + cmdName + ' is live.' + mismatchNote + '\nNothing is installed yet. Reply YES within 5 minutes to go ahead, or NO to cancel.');
 }
 async function probeExports(pkg) {
   const script = "const { createRequire } = await import('node:module');"
@@ -457,6 +620,11 @@ async function runInstallConfirmed(ctx, p) {
   const mb = await shell.backupManifests();
   if (!mb) return ctx.reply('Aborted - could not back up package.json/package-lock.json first. Nothing was changed.');
   shell.audit('INSTALL ' + pkg + ' manifest backup: ' + mb);
+  const probe = await sandboxInstallProbe(pkg, version);
+  if (probe && probe.ok === false) {
+    return ctx.reply('Pre-check failed: ' + probe.why + ' Nothing was installed - manifests untouched. Try a different package/version or ask me to hand-write the command.');
+  }
+  if (probe && probe.ok === true && !probe.inconclusive) await ctx.reply('Pre-check passed: ' + pkg + ' installed and imported in an isolated throwaway folder (install scripts disabled, scrubbed environment, no access to bot files/secrets). Installing for real now...');
   const inst = await shell.execShell('npm install ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 240000 });
   shell.audit('INSTALL ' + pkg + ' -> exit ' + inst.code);
   if (inst.code !== 0) return ctx.reply('npm install failed, nothing was added:\n' + String(inst.out || '').slice(-400));
@@ -501,15 +669,34 @@ async function runInstallConfirmed(ctx, p) {
   }
   if (!code) { await rollback('codegen failed: ' + lastFail); return ctx.reply('I could not generate working code for /' + cmdName + ' after 3 tries (last issue: ' + lastFail + '). Rolled back: package uninstalled, nothing added - try again or rephrase.'); }
   fs.writeFileSync(tmpFile, code);
+  // Ask codegen for ONE deterministic functional test spec; sanitize before trusting it.
+  let spec = null;
+  try {
+    const sr = await ai('Here is a WhatsApp bot command body for /' + cmdName + ' using package ' + pkg + ':\n' + code.slice(0, 3000) + '\nInvent ONE harmless deterministic test call. Reply with ONLY JSON: {"args":["word1"],"expect":"<javascript regex source a correct ctx.reply text must match>"}. The test MUST NOT use the network, files, dates or randomness, and must not send anything; it must finish in under 5 seconds. If the command inherently needs network/files/media, reply {"none":true}.', { temperature: 0 }, 'codegen');
+    spec = sanitizeSelfTestSpec(String(sr && sr.text || ''));
+  } catch { spec = null; }
+  let selfTestNote = 'usage-path check passed (no deterministic functional test applicable; real output unproven until you run it)';
   try {
     const mod = await import('./' + path.basename(tmpFile) + '?t=' + Date.now());
     const cmd = mod.default;
     if (!cmd?.name || typeof cmd.run !== 'function') throw new Error('bad module shape');
     if (cmd.minArgs !== 1) throw new Error('template minArgs changed');
-    const replies = [];
-    const mockCtx = { args: [], sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: ctx.commands, sock: ctx.sock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
-    await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
-    shell.audit('INSTALL self-test passed for /' + cmdName);
+    const runOnce = async (args) => {
+      const replies = [];
+      const mockCtx = { args, sender: ctx.sender, senderJid: ctx.senderJid, jid: ctx.jid, isOwner: true, isGroup: false, msg: ctx.msg, text: '', commands: ctx.commands, sock: ctx.sock, reply: async (t) => { replies.push(String(t)); return { key: {} }; } };
+      await Promise.race([cmd.run(mockCtx), new Promise((_, rej) => setTimeout(() => rej(new Error('self-test timed out (15s)')), 15000))]);
+      for (const t of replies) if (t.includes('[object Object]')) throw new Error('a reply contained "[object Object]" (an object was rendered as text)');
+      return replies;
+    };
+    const usageReplies = await runOnce([]);
+    if (!usageReplies.length) throw new Error('usage path produced no reply at all');
+    if (spec) {
+      const fr = await runOnce(spec.args);
+      const re = new RegExp(spec.expect, 'i');
+      if (!fr.some((t) => re.test(t))) throw new Error('functional check failed: expected a reply matching /' + spec.expect + '/i, got: ' + (fr.join(' | ') || '(no reply)').slice(0, 120));
+      selfTestNote = 'functional check passed (args [' + spec.args.join(', ') + '] -> reply matched /' + spec.expect + '/i)';
+    }
+    shell.audit('INSTALL self-test passed for /' + cmdName + ': ' + selfTestNote);
   } catch (e) {
     await shell.execShell('npm uninstall ' + JSON.stringify(pkg) + ' --no-audit --no-fund', { timeoutMs: 180000 });
     try { fs.unlinkSync(tmpFile); } catch {}
@@ -519,7 +706,7 @@ async function runInstallConfirmed(ctx, p) {
   fs.renameSync(tmpFile, finalFile);
   noteGenerated(cmdName, { pkg, version, file: finalFile, source: 'install', probeKeys: working.flatMap(([, v]) => v.keys || []).slice(0, 40) });
   shell.audit('COMMAND ADDED /' + cmdName + ' (package ' + pkg + ')');
-  await ctx.reply('Installed ' + pkg + (version ? ' v' + version : '') + '. /' + cmdName + ' loads correctly (usage self-test passed). Restarting Jarvis now - back in about a minute. Honest note: real features are only proven when you run them; if /' + cmdName + ' errors, it will now show the real reason. (Rollback: "/agent remove the ' + cmdName + ' command".)');
+  await ctx.reply('Installed ' + pkg + (version ? ' v' + version : '') + '. /' + cmdName + ' ' + selfTestNote + '. Restarting Jarvis now - back in about a minute. Honest note: real features are only proven when you run them; if /' + cmdName + ' errors, it will now show the real reason. (Rollback: "/agent remove the ' + cmdName + ' command".)');
   try { const { shutdown } = await import('../connection/whatsapp.js'); setTimeout(() => shutdown(0), 3000); } catch (e) { logger.warn('[agent] restart failed: ' + (e?.message || 'error')); }
   return true;
 }
@@ -1732,11 +1919,35 @@ export default {
   async run(ctx) {
     if (!featOn('agent')) return ctx.reply('Agent mode is turned off right now.');
     const goal = ctx.args.join(' ').trim().slice(0, MAX_GOAL);
-    if (!goal) return ctx.reply('Tell me the goal. Example: ' + config.prefix + 'agent weather in Kolkata and today\'s top news');
+    let mediaImg = null;
+    try { const m = findMedia(ctx.msg); if (m && m.type === 'image' && !m.animated) mediaImg = m; } catch {}
+    if (!goal && !mediaImg) return ctx.reply('Tell me the goal. Example: ' + config.prefix + 'agent weather in Kolkata and today\'s top news. You can also send a photo with a caption like "' + config.prefix + 'agent enhance this photo".');
     // "/agent yes" and "/agent no" answer a pending destructive confirmation
     if (/^(yes|no)$/i.test(goal) && featOn('ownershell')) {
       if (await handlePendingAnswer(ctx, /^yes$/i.test(goal))) return;
     }
+    // Media-aware goals: a photo with an enhance intent or a question about it.
+    if (mediaImg) {
+      const route = mediaGoalRoute(goal);
+      if (route && route.kind === 'enhance') {
+        shell.audit('MEDIA GOAL enhance mode=' + route.mode);
+        await ctx.reply('Got the photo - running local ' + route.mode + ' (stays on this bot, no upload). For AI providers use ' + config.prefix + 'remini2 <provider> <scale> yes instead.');
+        return runEnhance({ ...ctx, args: ['local'] }, route.mode);
+      }
+      if (route && route.kind === 'vision') {
+        if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) {
+          if (!featOn('vision')) return ctx.reply('The vision feature is turned off right now.');
+          shell.stage([], { kind: 'mediavision', mediavision: { question: route.question, msg: ctx.msg } });
+          shell.audit('MEDIA GOAL vision STAGED: ' + route.question.slice(0, 80));
+          return ctx.reply('To answer "' + route.question.slice(0, 120) + '" I would send this photo to an external AI vision service (Cohere Aya Vision, fallback Google Gemini - free tiers; the photo leaves this bot and provider retention is not verified). Reply YES within 5 minutes to send it, or NO to cancel.');
+        }
+        return ctx.reply('To ask about a photo, use ' + config.prefix + 'vision <your question>. Note: it sends the photo to an external AI service (Cohere Aya Vision, fallback Google Gemini).');
+      }
+      if (route && route.kind === 'usage') {
+        return ctx.reply('I can see the photo. Tell me what to do with it - e.g. "' + config.prefix + 'agent enhance this photo" (local, no upload) or ask a question like "' + config.prefix + 'agent what does this say?" (external AI, I ask before sending).');
+      }
+    }
+    if (!goal) return ctx.reply('Tell me the goal. Example: ' + config.prefix + 'agent weather in Kolkata and today\'s top news');
     if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) {
       if (/^retry\b/i.test(goal)) {
         const n = agentqueue.retryFailed();
@@ -1765,6 +1976,7 @@ export default {
     if (featOn('ownershell') && shell.isVerifiedOwnerDM(ctx)) {
       if (/^\s*install\b/i.test(goal) || parseInstallGoal(goal)) return runInstallFlow(ctx, goal);
       if (/^\s*update\b/i.test(goal)) return runUpdateFlow(ctx, goal);
+      if (isSystemStatusGoal(goal)) return runSystemStatus(ctx);
       if (isInfoQuestion(goal)) return runInfoAnswer(ctx, goal);
       if (isJunkCleanupGoal(goal)) return runJunkCleanup(ctx);
       if (isCancelDownloadGoal(goal)) {
