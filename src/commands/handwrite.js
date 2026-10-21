@@ -18,7 +18,8 @@ function wrap(text, max) {
 }
 
 export default {
-  name: 'handwrite', aliases: ['hw', 'write'], category: 'Media',
+  // 'hw' alias dropped: it collided with /homework's alias, so it never resolved here.
+  name: 'handwrite', aliases: ['write'], category: 'Media',
   description: 'Write your text as a handwritten note image',
   usage: 'handwrite <text>',
   async run(ctx) {

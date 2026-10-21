@@ -12,7 +12,8 @@ function mentionedIds(msg) {
   return [];
 }
 export default {
-  name: 'expense', aliases: ['split', 'exp', 'kharcha'], category: 'Group',
+  // 'split' alias dropped: the /split command's direct name always wins, so this alias was dead.
+  name: 'expense', aliases: ['exp', 'kharcha'], category: 'Group',
   description: 'Split group expenses and see who owes whom',
   usage: 'expense add <amount> <what> @people | balance | settle | paid <amount> @person | list | delete <id> | clear',
   minArgs: 0,
