@@ -2,6 +2,7 @@
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { store } from './store.js';
+import { MetadataCache } from './metadataCache.js';
 
 export const LEVEL = { member: 1, groupAdmin: 2, botAdmin: 3, owner: 4 };
 export const LEVEL_NAME = { 1: 'member', 2: 'group admin', 3: 'bot admin', 4: 'bot owner' };
@@ -9,23 +10,16 @@ export const LEVEL_NAME = { 1: 'member', 2: 'group admin', 3: 'bot admin', 4: 'b
 export const num = (j = '') => String(j).split('@')[0].split(':')[0];
 const idsOf = (p) => [p.id, p.lid, p.phoneNumber, p.jid].filter(Boolean).map(num);
 
-const metaCache = new Map(); // gid -> { at, meta }
-const TTL = 45_000;
+const metaCache = new MetadataCache();
 
 export async function getMeta(sock, gid, fresh = false) {
-  const hit = metaCache.get(gid);
-  if (!fresh && hit && Date.now() - hit.at < TTL) return hit.meta;
-  try {
-    const meta = await sock.groupMetadata(gid);
-    metaCache.set(gid, { at: Date.now(), meta });
-    if (metaCache.size > 300) metaCache.delete(metaCache.keys().next().value);
-    return meta;
-  } catch (err) {
+  try { return await metaCache.get(sock, gid, fresh); }
+  catch (err) {
     logger.warn(`[groups] metadata failed: ${String(err.message).slice(0, 80)}`);
-    return hit?.meta || null;
+    return null; // Never revive stale admin rights after a failed refresh.
   }
 }
-export const dropMeta = (gid) => metaCache.delete(gid);
+export const dropMeta = (gid) => metaCache.drop(gid);
 
 /** Finds the participant that matches any of the given ids (jid, lid or phone number). */
 export function findMember(meta, ...ids) {

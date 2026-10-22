@@ -48,7 +48,8 @@ function def(name, o) {
       if (!ctx.isGroup) return ctx.reply(rt(ctx,'group_only'));
       if (!store()) return ctx.reply(t(ctx,'error_service'));
       if (rateLimited(`cmd:${ctx.jid}:${ctx.sender}`, 10, 60_000) && !ctx.isOwner) return ctx.reply(t(ctx,'cooldown',{seconds:60}));
-      const meta = await getMeta(ctx.sock, ctx.jid);
+      // Privileged operations must not authorize from a cached admin list.
+      const meta = await getMeta(ctx.sock, ctx.jid, (o.level || LEVEL.member) > LEVEL.member || !!o.botAdmin);
       if (!meta) return ctx.reply(t(ctx,'error_service'));
       const level = levelOf(ctx.sock, meta, ctx.msg, ctx.isOwner);
       const need = o.level || LEVEL.member;
