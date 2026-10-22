@@ -105,16 +105,33 @@ test('view-once detection through wrappers', () => {
   assert.equal(rec.unwrap({ conversation: 'x' }).viewOnce, false);
 });
 
-test('getpp works, hides gracefully', async () => {
+test('getpp works, hides gracefully', async (t) => {
+  // Real fetchPublic/requestPublic guard runs; only DNS and the https transport are replaced.
+  const dns = (await import('node:dns/promises')).default; const https = (await import('node:https')).default;
+  const { EventEmitter } = await import('node:events'); const { Readable } = await import('node:stream');
+  const jpeg = Buffer.alloc(240); jpeg[0] = 0xff; jpeg[1] = 0xd8;
+  const reqs = [];
+  t.mock.method(dns, 'lookup', async () => [{ address: '93.184.216.34', family: 4 }]);
+  t.mock.method(https, 'request', (u, opts, cb) => {
+    const req = new EventEmitter(); req.setTimeout = () => {}; req.destroy = () => {};
+    req.end = () => { const res = Readable.from([jpeg]); res.statusCode = 200; res.headers = {}; reqs.push({ host: new URL(u).hostname, pinned: opts.lookup }); cb(res); };
+    return req;
+  });
   const s = mkSock();
-  global.fetch = async () => { const buf = Buffer.alloc(240); buf[0]=0xff; buf[1]=0xd8; return { ok: true, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) }; };
+  s.profilePictureUrl = async (j) => { if (j.startsWith('999')) throw new Error('item-not-found'); return 'https://pps.whatsapp.net/v/t61/pp.jpg'; };
   await getpp.run(ctxFor(s, { args: ['919876543210'] }));
   assert.ok(s.sent.at(-1).c.image);
+  assert.equal(reqs.length, 1); assert.equal(reqs[0].host, 'pps.whatsapp.net');
+  await new Promise((ok) => reqs[0].pinned('pps.whatsapp.net', {}, (e, addr) => { assert.equal(addr, '93.184.216.34'); ok(); })); // connection pinned to the validated address
   await getpp.run(ctxFor(s, { args: ['999876543210'] }));
   assert.match(s.sent.at(-1).c.text, /no profile picture/i);
   const other = ctxFor(s, { jid: '955@s.whatsapp.net', isOwner: false, msg: { key: { id: 'z', remoteJid: '955@s.whatsapp.net', fromMe: false }, message: {} } });
   await getpp.run(other);
   assert.equal(s.sent.at(-1).jid, '955@s.whatsapp.net');
+  // a profile URL that resolves to a private address is refused by the real guard (no request made)
+  const before = reqs.length; dns.lookup.mock.mockImplementation(async () => [{ address: '10.0.0.5', family: 4 }]);
+  await getpp.run(ctxFor(s, { args: ['919876543210'] }));
+  assert.equal(reqs.length, before); assert.ok(!s.sent.at(-1).c.image);
 });
 
 test('antidelete settings, /deleted list, size cap and expiry', async () => {

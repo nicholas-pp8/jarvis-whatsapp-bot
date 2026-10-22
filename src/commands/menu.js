@@ -25,7 +25,7 @@ const SECTIONS = [
 ];
 const SHORT = {
   menu: 'all commands',
-  queue: 'your download queue position',
+  queue: 'owner command queue (runs when online)',
   history: 'your recent commands',
   limits: 'bot limits and your usage',
   backup: 'owner data backup zip',

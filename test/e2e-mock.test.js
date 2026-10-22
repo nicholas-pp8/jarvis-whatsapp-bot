@@ -32,3 +32,13 @@ test('command flow with a mocked socket', async () => {
   await handleMessage(sock, { ...mk('/status'), key: { remoteJid: '915555555555@s.whatsapp.net', id: 'x4' } });
   assert.match(sent.at(-1).content.text, /ǫᴜᴇᴜᴇ/);
 });
+
+// Failure-reference path (previously covered via /video <pinterest link>, which /video now rejects as non-YouTube).
+test('a failed command replies with a download-failed message and a reference id, without the raw error', async () => {
+  const { replyFailure } = await import('../src/recovery/reply.js');
+  const out = [];
+  const ctx = { senderJid: '919999999999@s.whatsapp.net', sender: '919999999999', reply: async (text) => { out.push(text); } };
+  await replyFailure(ctx, 'video', new Error('SECRET-INTERNAL-DETAIL spawn ENOENT /tmp/x'));
+  assert.match(out.at(-1), /Reference: [a-f0-9]{10}/);
+  assert.doesNotMatch(out.at(-1), /SECRET-INTERNAL-DETAIL|ENOENT/);
+});
