@@ -51,6 +51,32 @@ test('a staged confirmation only counts from the person who staged it', async ()
   assert.equal(await handlePendingAnswer(ownerCtx, false), false, 'owner cannot answer the operator\'s pending action');
   assert.equal(await handlePendingAnswer(opCtx, false), true, 'the operator can cancel their own');
 });
+test('jobs created by an operator carry "by"; owner-created ones do not', async () => {
+  const { execStep } = await import(root + 'commands/agent.js');
+  const sched = path.join('data', 'agent-schedules.json');
+  const results = [];
+  await execStep(dm({ __goal: 'x' }), { type: 'schedule', cron: '0 3 * * *', goal: 'clean old logs' }, results);
+  await execStep({ isOwner: true, jid: 'o@s.whatsapp.net', __goal: 'x' }, { type: 'schedule', cron: '0 4 * * *', goal: 'owner task' }, results);
+  const list = JSON.parse(fs.readFileSync(fs.existsSync(sched) ? sched : path.join('data', fs.readdirSync('data').find((x) => /sched/i.test(x))), 'utf8'));
+  assert.equal(list.find((e) => e.goal === 'clean old logs').by, NUM);
+  assert.equal('by' in list.find((e) => e.goal === 'owner task'), false);
+  (await import(root + 'commands/agent.js')).stopAllSchedules();
+});
+test('interrupted-task notices go to the creator (operator) DM; revoked operator falls back to owner; owner tasks to owner', async () => {
+  const { resumeInterruptedTasks } = await import(root + 'commands/agent.js');
+  const tasks = path.join('data', 'agent-tasks.json');
+  fs.writeFileSync(tasks, JSON.stringify([
+    { id: 'a1', goal: 'op task', status: 'running', resumeCount: 1, by: NUM },
+    { id: 'b2', goal: 'owner task', status: 'running', resumeCount: 1 },
+    { id: 'c3', goal: 'revoked task', status: 'running', resumeCount: 1, by: '919999999999' }]));
+  const sent = []; const s = { sendMessage: async (j, c) => { sent.push([j, c.text]); return { key: {} }; } };
+  await resumeInterruptedTasks(s);
+  const to = (g) => sent.find((x) => x[1].includes(g))?.[0];
+  assert.equal(to('op task'), NUM + '@s.whatsapp.net');
+  assert.notEqual(to('owner task'), NUM + '@s.whatsapp.net');
+  assert.notEqual(to('revoked task'), '919999999999@s.whatsapp.net');
+  assert.equal(to('revoked task'), to('owner task'));
+});
 process.on('exit', () => { try { process.chdir(cwd); } catch {} });
 test('reachability: an operator DM reaches the owner-only /agent branch (deterministic "permissions" subcommand, no AI/network)', async () => {
   const agent = (await import(root + 'commands/agent.js')).default;

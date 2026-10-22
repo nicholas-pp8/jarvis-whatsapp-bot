@@ -1,3 +1,4 @@
+import { operatorNumbers } from '../permissions/operators.js';
 import {getPerformanceProfile,mediaDelay} from './performanceMode.js';
 import {safeRead} from '../recovery/index.js';
 import { spawn } from 'node:child_process';
@@ -25,7 +26,7 @@ export class DownloadError extends Error {
 /* ------------------------------ queue ------------------------------ */
 
 const numOf = (j = '') => String(j).split('@')[0].split(':')[0];
-const isOwnerUser = (userId) => { const o = numOf(config.ownerNumber || ''); return !!o && numOf(userId) === o; };
+const isOwnerUser = (userId) => { const o = numOf(config.ownerNumber || ''); const u = numOf(userId); return !!u && (u === o || operatorNumbers().includes(u)); };
 // RAM gate for the owner "never refuse" mode: start new downloads only while RSS is
 // under the gate, so unlimited queueing can never crash the 909MB box.
 const RAM_GATE_MB = Number(process.env.JARVIS_DL_RAM_GATE_MB) || 600;

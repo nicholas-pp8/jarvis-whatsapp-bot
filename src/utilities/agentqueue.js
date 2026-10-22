@@ -28,6 +28,11 @@ export function failedItems() {
   return q.items.filter((i) => i.status === 'failed');
 }
 
+export function pendingCount() {
+  const q = liveQueue || load();
+  return q && !q.finishedAt && Array.isArray(q.items) ? q.items.filter((i) => i.status === 'pending').length : 0;
+}
+
 // items: [{cmd, args}]. Appends to the running queue when one is active.
 export function enqueue(jid, items, goal) {
   if (liveQueue && !liveQueue.finishedAt) {

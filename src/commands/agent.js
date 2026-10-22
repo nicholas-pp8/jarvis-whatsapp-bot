@@ -14,6 +14,7 @@ import { featOn } from '../config/features.js';
 import { askAi } from '../ai/providers.js';
 import { registry } from '../handlers/commandHandler.js';
 import * as shell from '../utilities/ownershell.js';
+import { operatorNumbers } from '../permissions/operators.js';
 import { suggest } from '../utils/suggest.js';
 import { createProgressMessage } from '../utils/progressBar.js';
 import { getSock } from '../utilities/ownersock.js';
@@ -67,7 +68,8 @@ export function extractNumberedList(goal) {
   const clean = items.length >= 3 && items.every(Boolean) && all.length === seq.length;
   return { items: clean ? items : [], clean, markers: all.length };
 }
-const MAX_BULK = 200; // items per request: ~20 s each, so 200 is about an hour; larger lists must be sent in batches
+const MAX_BULK = 1000; // items per request; each item is delivered one at a time, durably (queue file survives restarts). Over this: rejected, nothing started.
+const MAX_PENDING = 1500; // total pending items across requests, so repeated requests cannot grow the queue file without bound
 const MEDIA_INTENT = /\b(download|play|songs?|videos?|gaana|gane|bhej|send|get)\b/i;
 const MAX_STEPS = 5, MAX_GOAL = 20000, MAX_ARG = 120, SH_STEPS = 15, SH_EXEC_CAP = 100;
 
@@ -828,27 +830,36 @@ function saveSchedules(list) {
 function ownerDM() {
   return String(config.ownerNumber).replace(/\D/g, '') + '@s.whatsapp.net';
 }
+// Jobs started by a verified operator (see permissions/operators.js) remember who made them ("by") and report back to that person's own DM.
+const opJid = (by) => (by && /^[1-9]\d{6,14}$/.test(String(by)) ? String(by) + '@s.whatsapp.net' : ownerDM());
+const actorAllowed = (by) => !by || operatorNumbers().includes(String(by));
+const reportJid = (by) => (actorAllowed(by) ? opJid(by) : ownerDM()); // a revoked operator's leftovers fall back to the owner
+function jobCtx(s, by, text, idPrefix) {
+  const jid = opJid(by);
+  const num = by ? String(by) : String(config.ownerNumber).replace(/\D/g, '');
+  return {
+    sock: s, jid, sender: num, senderJid: jid, isOwner: true, operator: by ? String(by) : undefined, isGroup: false,
+    msg: { key: { remoteJid: jid, fromMe: false, id: idPrefix + Date.now() }, message: { conversation: '/agent ' + text } },
+    text, commands: registry, args: text.split(/\s+/),
+    reply: (t, o) => s.sendMessage(jid, { text: t, ...(o || {}) }),
+  };
+}
 function scheduleOne(entry) {
   if (!cron.validate(entry.cron) || entry.active === false) return false;
   const task = cron.schedule(entry.cron, async () => {
     const s = getSock();
     if (!s) { logger.warn('[agent] schedule "' + (entry.goal || entry.topic || '').slice(0, 40) + '" skipped: no live connection'); return; }
+    if (!actorAllowed(entry.by)) { shell.audit('SCHEDULE SKIPPED id=' + entry.id + ' (creator no longer an operator)'); return; }
     if (entry.kind === 'message') { await runMessageJob(entry); return; }
-    shell.audit('SCHEDULE FIRED id=' + entry.id + ' goal="' + entry.goal.slice(0, 120) + '"');
-    const ctx = {
-      sock: s, jid: ownerDM(), sender: String(config.ownerNumber).replace(/\D/g, ''),
-      senderJid: ownerDM(), isOwner: true, isGroup: false,
-      msg: { key: { remoteJid: ownerDM(), fromMe: false, id: 'AGENTSCHED' + Date.now() }, message: { conversation: '/agent ' + entry.goal } },
-      text: entry.goal, commands: registry,
-      args: entry.goal.split(/\s+/),
-      reply: (t, o) => s.sendMessage(ownerDM(), { text: t, ...(o || {}) }),
-    };
-    try { await runShellMode(ctx, entry.goal); }
+    shell.audit('SCHEDULE FIRED id=' + entry.id + (entry.by ? ' by=' + String(entry.by).slice(-2) : '') + ' goal="' + entry.goal.slice(0, 120) + '"');
+    const ctx = jobCtx(s, entry.by, entry.goal, 'AGENTSCHED');
+    try { await shell.actorStore.run({ actor: shell.actorOf(ctx) }, () => runShellMode(ctx, entry.goal)); }
     catch (e) { logger.warn('[agent] scheduled run failed: ' + (e?.message || 'error')); }
   });
   schedJobs.set(entry.id, task);
   return true;
 }
+export function stopAllSchedules() { for (const t of schedJobs.values()) { try { t.stop(); } catch {} } schedJobs.clear(); }
 function initSchedules() {
   for (const e of loadSchedules()) {
     try { scheduleOne(e); } catch { /* skip bad entry */ }
@@ -865,7 +876,8 @@ function saveTasks(list) {
 }
 function taskStart(goal) {
   const list = loadTasks();
-  const t = { id: Math.random().toString(36).slice(2, 8), goal: String(goal).slice(0, 200), status: 'running', startedAt: Date.now(), resumeCount: 0 };
+  const actor = shell.actorStore.getStore()?.actor || '';
+  const t = { id: Math.random().toString(36).slice(2, 8), goal: String(goal).slice(0, 200), status: 'running', startedAt: Date.now(), resumeCount: 0, ...(actor.startsWith('op:') ? { by: actor.slice(3) } : {}) };
   list.push(t); saveTasks(list);
   return t.id;
 }
@@ -908,25 +920,20 @@ export async function resumeInterruptedTasks(s) {
     const list = loadTasks();
     const { toResume, abandoned } = decideResume(list);
     saveTasks(list);
-    const own = ownerDM();
     for (const task of abandoned) {
       shell.audit('TASK ABANDONED id=' + task.id + ' goal="' + task.goal.slice(0, 120) + '"');
-      await s.sendMessage(own, { text: '⚠️ I could not finish a task even after retrying: "' + task.goal.slice(0, 120) + '". Ask me again if you still need it.' }).catch(() => {});
+      await s.sendMessage(reportJid(task.by), { text: '⚠️ I could not finish a task even after retrying: "' + task.goal.slice(0, 120) + '". Ask me again if you still need it.' }).catch(() => {});
     }
     if (toResume.length) {
       shell.audit('TASK RESUME x' + toResume.length + ': ' + toResume.map((x) => x.goal.slice(0, 40)).join(' | '));
-      await s.sendMessage(own, { text: '🔁 I was interrupted mid-work. Resuming ' + toResume.length + ' unfinished task(s) now:\n' + toResume.map((x) => '- ' + x.goal.slice(0, 80)).join('\n') }).catch(() => {});
+      const groups = new Map();
+      for (const t of toResume) { const k = actorAllowed(t.by) ? (t.by || '') : ''; groups.set(k, [...(groups.get(k) || []), t]); }
+      for (const [k, ts] of groups) await s.sendMessage(reportJid(k || undefined), { text: '🔁 I was interrupted mid-work. Resuming ' + ts.length + ' unfinished task(s) now:\n' + ts.map((x) => '- ' + x.goal.slice(0, 80)).join('\n') }).catch(() => {});
       for (const task of toResume) {
-        const ownNum = own.replace('@s.whatsapp.net', '');
-        const ctx = {
-          sock: s, jid: own, sender: ownNum, senderJid: own,
-          isOwner: true, isGroup: false,
-          msg: { key: { remoteJid: own, fromMe: false, id: 'AGENTRESUME' + Date.now() }, message: { conversation: '/agent ' + task.goal } },
-          text: task.goal, commands: registry,
-          args: task.goal.split(/\s+/),
-          reply: (txt, o) => s.sendMessage(own, { text: txt, ...(o || {}) }),
-        };
-        try { await runShellMode(ctx, task.goal, task.id, task.transcript); }
+        const by = actorAllowed(task.by) ? task.by : undefined; // a revoked operator's task resumes as the owner's only if the owner never made it: skip it instead
+        if (task.by && !by) { shell.audit('TASK RESUME SKIPPED id=' + task.id + ' (creator no longer an operator)'); continue; }
+        const ctx = jobCtx(s, by, task.goal, 'AGENTRESUME');
+        try { await shell.actorStore.run({ actor: shell.actorOf(ctx) }, () => runShellMode(ctx, task.goal, task.id, task.transcript)); }
         catch (e) { logger.warn('[agent] task resume failed: ' + (e?.message || 'error')); }
       }
     }
@@ -1032,7 +1039,7 @@ export async function execStep(ctx, step, results) {
   if (step.type === 'note') { results.push({ cmd: 'note', code: 0, out: step.text }); return; }
   if (step.type === 'schedule') {
     const list = loadSchedules();
-    const entry = { id: Math.random().toString(36).slice(2, 8), cron: step.cron, goal: step.goal, createdAt: Date.now() };
+    const entry = { id: Math.random().toString(36).slice(2, 8), cron: step.cron, goal: step.goal, createdAt: Date.now(), ...(ctx.operator ? { by: String(ctx.operator) } : {}) };
     if (scheduleOne(entry)) {
       list.push(entry); saveSchedules(list);
       shell.audit('SCHEDULE SET id=' + entry.id + ' cron="' + entry.cron + '" goal="' + entry.goal + '"');
@@ -1060,7 +1067,9 @@ export async function execStep(ctx, step, results) {
       let note = '';
       if (L.clean && MEDIA_INTENT.test(String(ctx.__goal || '')) && L.items.length > step.items.length) { shell.audit('BULK LIST RESTORED planner=' + step.items.length + ' listed=' + L.items.length); step = { ...step, items: L.items.map((x) => x.slice(0, MAX_ARG)) }; note = ' (all ' + L.items.length + ' items you listed)'; }
       else if (L.markers >= 3 && !L.clean) { results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Not queued: your message has ' + L.markers + ' numbered markers but the numbering has gaps, repeats or empty items, so I cannot be sure every item is captured (the planner found ' + step.items.length + '). Nothing was started. Send the list numbered 1,2,3... in order, or one item per line.' }); return; }
-      if (step.items.length > MAX_BULK) { results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Not queued: ' + step.items.length + ' items is over the ' + MAX_BULK + ' per request limit. Nothing was started; send it in batches of up to ' + MAX_BULK + '.' }); return; }
+      if (step.items.length > MAX_BULK) { results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Not queued: ' + step.items.length + ' items is over the ' + MAX_BULK + ' per request limit. Nothing was started; send it in parts of up to ' + MAX_BULK + ' (after the first part finishes).' }); return; }
+      const pend = agentqueue.pendingCount();
+      if (pend + step.items.length > MAX_PENDING) { results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Not queued: ' + pend + ' items are still pending and adding ' + step.items.length + ' would pass the ' + MAX_PENDING + ' pending limit. Nothing was started; wait for the queue to finish or say "/agent cancel downloading".' }); return; }
       const n = step.items.length;
       const qq = agentqueue.enqueue(ctx.jid, step.items.map((a) => ({ cmd: step.cmd, args: a })), ctx.__goal || 'bulk download');
       const tail = Array.isArray(qq?.items) ? qq.items.slice(-n) : [];
@@ -1153,7 +1162,7 @@ async function runShellModeBody(ctx, goal, tid, seedTranscript) {
   let restartsPlanned = 0, finalNote = null, executed = 0;
 
   const goalNumbers = (goal.match(/\+?[0-9][0-9\s-]{6,16}[0-9]/g) || []).map((s) => s.replace(/\D/g, ''));
-  const ownNumber = String(config.ownerNumber).replace(/\D/g, '');
+  const ownNumber = ctx.operator ? String(ctx.operator) : String(config.ownerNumber).replace(/\D/g, '');
   for (let round = 1; round <= 10 && executed < SH_EXEC_CAP; round++) {
     let plan = null;
     try {
@@ -1656,9 +1665,9 @@ export async function runMessageJob(entry) {
     const items = await fetchNewsItems(entry.topic);
     const r = await ai('Summarize these LIVE news headlines about "' + entry.topic + '" into a short WhatsApp digest (max 6 lines, plain English, keep each link with its headline):\n' + items.map((x, i) => (i + 1) + '. ' + x.title + ' ' + x.link).join('\n'), { temperature: 0.3 }, 'msgjob');
     const text = String(r && r.text || '').trim() || items.map((x) => '- ' + x.title + '\n' + x.link).join('\n');
-    await s.sendMessage(ownerDM(), { text: '📰 ' + entry.topic + ' update (live sources):\n' + text.slice(0, 2000) });
+    await s.sendMessage(reportJid(entry.by), { text: '📰 ' + entry.topic + ' update (live sources):\n' + text.slice(0, 2000) });
   } catch (e) {
-    await s.sendMessage(ownerDM(), { text: '📰 Your scheduled "' + entry.topic + '" update could not run: ' + String(e?.message || e).slice(0, 150) + '. I will try again at the next scheduled time.' }).catch(() => {});
+    await s.sendMessage(reportJid(entry.by), { text: '📰 Your scheduled "' + entry.topic + '" update could not run: ' + String(e?.message || e).slice(0, 150) + '. I will try again at the next scheduled time.' }).catch(() => {});
   }
 }
 
@@ -1683,7 +1692,7 @@ async function runMessageJobFlow(ctx, goal) {
 async function runMessageJobConfirmed(ctx, p) {
   const spec = p.msgjob;
   const list = loadSchedules();
-  const entry = { id: Math.random().toString(36).slice(2, 8), kind: 'message', cron: spec.cron, topic: spec.topic, goal: 'news update: ' + spec.topic, active: true, createdAt: Date.now() };
+  const entry = { id: Math.random().toString(36).slice(2, 8), kind: 'message', cron: spec.cron, topic: spec.topic, goal: 'news update: ' + spec.topic, active: true, createdAt: Date.now(), ...(ctx.operator ? { by: String(ctx.operator) } : {}) };
   if (!scheduleOne(entry)) return ctx.reply('That schedule was invalid - nothing was set.');
   list.push(entry); saveSchedules(list);
   shell.audit('MSGJOB SET id=' + entry.id + ' cron="' + entry.cron + '" topic="' + entry.topic + '"');
