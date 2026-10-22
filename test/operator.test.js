@@ -52,3 +52,12 @@ test('a staged confirmation only counts from the person who staged it', async ()
   assert.equal(await handlePendingAnswer(opCtx, false), true, 'the operator can cancel their own');
 });
 process.on('exit', () => { try { process.chdir(cwd); } catch {} });
+test('reachability: an operator DM reaches the owner-only /agent branch (deterministic "permissions" subcommand, no AI/network)', async () => {
+  const agent = (await import(root + 'commands/agent.js')).default;
+  const out = [];
+  const ctx = dm({ args: ['permissions'], reply: async (t) => { out.push(String(t)); return { key: {} }; }, sock: { sendMessage: async (j, c) => { out.push(String(c?.text || '')); return { key: {} }; } }, commands: [] });
+  await agent.run(ctx);
+  assert.ok(out.join('\n').length > 20, 'got a reply from the owner-only permissions report: ' + out.join('|').slice(0, 80));
+  assert.doesNotMatch(out.join('\n'), /breather|could not make a safe plan|Planning/);
+  assert.match(fs.readFileSync(path.join('data', 'agent-audit.log'), 'utf8'), /OPERATOR 90 \/agent permissions/);
+});
