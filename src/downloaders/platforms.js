@@ -123,15 +123,21 @@ export function parseMeta(html) {
 }
 
 // Fetch the public page and return {title, desc, video, audio, image}. Redirects are followed manually and each hop is checked.
-export async function pageMeta(url, { fetchImpl } = {}) {
+async function readCapped(stream, max) {
+  const chunks = []; let n = 0;
+  for await (const c of stream) { chunks.push(c); n += c.length; if (n >= max) { stream.destroy(); break; } }
+  return Buffer.concat(chunks).subarray(0, max).toString('utf8');
+}
+export async function pageMeta(url, { fetchImpl, requestImpl = requestPublic } = {}) {
   const hit = cache.get(url); if (hit && Date.now() - hit.at < CACHE_MS) return hit.meta;
   let last = 'no data';
   for (const ua of UAS) {
     try {
       let cur = new URL(url);
       for (let hop = 0; hop < 4; hop++) {
-        const r0 = fetchImpl ? null : await requestPublic(cur.href ?? cur, { follow: false, headers: { 'user-agent': ua, accept: 'text/html,*/*' } }).catch((e) => { throw Object.assign(new Error(e.message), { code: e.code || 'NETWORK' }); });
-        const r = fetchImpl ? await fetchImpl(cur, { redirect: 'manual', headers: { 'user-agent': ua, accept: 'text/html,*/*' } }) : { status: r0.status, headers: { get: (k) => r0.headers[k.toLowerCase()] ?? null }, text: async () => (await fetchPublic(cur.href ?? cur, { headers: { 'user-agent': ua, accept: 'text/html,*/*' } })).body.toString('utf8') };
+        const r0 = fetchImpl ? null : await requestImpl(cur.href ?? cur, { follow: false, headers: { 'user-agent': ua, accept: 'text/html,*/*' } }).catch((e) => { throw Object.assign(new Error(e.message), { code: e.code || 'NETWORK' }); });
+        const r = fetchImpl ? await fetchImpl(cur, { redirect: 'manual', headers: { 'user-agent': ua, accept: 'text/html,*/*' } }) : { ok: r0.status >= 200 && r0.status < 300, status: r0.status, headers: { get: (k) => r0.headers[k.toLowerCase()] ?? null }, text: async () => (r0.stream ? readCapped(r0.stream, 1_500_000) : '') };
+        if (r0 && r0.stream && !r.ok) r0.stream.resume();
         if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { cur = new URL(r.headers.get('location'), cur); continue; }
         if (r.status === 404 || r.status === 410) throw Object.assign(new Error('content not found or deleted'), { final: true });
         if (r.status === 401 || r.status === 403) { last = 'login or access required'; break; }
