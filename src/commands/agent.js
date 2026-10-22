@@ -54,7 +54,18 @@ async function ai(prompt, opts, feature = 'general') {
 }
 // Shared codegen rules for install/builder/repair (bodies only, no imports).
 const CODEGEN_RULES = 'Rules:\n- Output ONLY raw JavaScript statements. No markdown, no code fences, no explanation, no function wrapper, NO export statements, NO import statements.\n- Load packages inside the body with await import().\n- ctx.args is the user\'s words as a string array; await ctx.reply(text) sends a plain reply; ctx.sock and ctx.jid are available for media replies; keep replies short, plain English.\n- NEVER read or print process.env, tokens, keys, .env, files under auth/, or data files like api-keys.json, dashboard-token, install-id, session-state.json. No child_process, no shell, no eval/new Function, no writes outside /tmp and data/. Only https URLs, never local or private addresses. Reply ONLY via ctx.reply or ctx.sock.sendMessage(ctx.jid, ...) - never hardcode a number or chat id.\n- On missing input, reply with the usage line. Wrap risky work in try/catch and on failure reply starting with "Error: " followed by the actual error message (first 150 chars), never a generic "failed" message. Keep it under 30 lines.\n- For multi-turn conversations you may use the sessions helper: const S = await import(\'../utils/sessions.js\'); S.begin(ctx, { cmd: \'name\', ttlMs: 300000, state: {}, onText: async (sctx, text, end) => { /* handle each reply; call end() when done */ } }); sctx has reply, jid, state.';
-const MAX_STEPS = 5, MAX_GOAL = 300, MAX_ARG = 120, SH_STEPS = 15, SH_EXEC_CAP = 100;
+// Explicit numbered list inside a goal ("1. a 2. b ..." or one per line). WhatsApp args arrive whitespace-collapsed, so
+// split on the numbers themselves; numbers must run 1,2,3... in order so "Top 10. x" style text is not mistaken for a list.
+export function extractNumberedList(goal) {
+  const text = String(goal || '');
+  const re = /(?:^|[\s,;:])(\d{1,6})\s*[.)]\s*/g;
+  const marks = []; let m, want = 1;
+  while ((m = re.exec(text))) { if (Number(m[1]) === want) { marks.push({ at: m.index + m[0].length, start: m.index }); want++; } }
+  if (marks.length < 3) return [];
+  const items = marks.map((k, n) => text.slice(k.at, n + 1 < marks.length ? marks[n + 1].start : text.length).replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return items.length === marks.length ? items : [];
+}
+const MAX_STEPS = 5, MAX_GOAL = 20000, MAX_ARG = 120, SH_STEPS = 15, SH_EXEC_CAP = 100;
 
 function resolveCmd(name) {
   const direct = registry.get(name);
@@ -1039,8 +1050,12 @@ async function execStep(ctx, step, results) {
   }
   if (step.type === 'bulk') {
     try {
+      // Never queue fewer items than the owner explicitly listed (the planner can drop or merge some).
+      const listed = extractNumberedList(ctx.__goal);
+      let note = '';
+      if (listed.length >= 3 && step.items.length !== listed.length) { shell.audit('BULK LIST RESTORED planner=' + step.items.length + ' listed=' + listed.length); step = { ...step, items: listed.map((x) => x.slice(0, MAX_ARG)) }; note = ' (all ' + listed.length + ' items you listed)'; }
       agentqueue.enqueue(ctx.jid, step.items.map((a) => ({ cmd: step.cmd, args: a })), ctx.__goal || 'bulk download');
-      results.push({ cmd: 'bulk /' + step.cmd + ' x' + step.items.length, code: 0, out: 'Queued ' + step.items.length + ' downloads via /' + step.cmd + '. Sending them to this chat one by one, each with retries - watch the separate progress message. Say "/agent retry" later to redo any that fail.' });
+      results.push({ cmd: 'bulk /' + step.cmd + ' x' + step.items.length, code: 0, out: 'Queued ' + step.items.length + ' downloads via /' + step.cmd + note + '. Sending them to this chat one by one, each with retries - watch the separate progress message. Say "/agent retry" later to redo any that fail.' });
     } catch (e) {
       results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Failed to queue: ' + (e?.message || 'error') });
     }
