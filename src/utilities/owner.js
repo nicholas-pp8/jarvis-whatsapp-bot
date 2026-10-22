@@ -22,6 +22,7 @@ export function ownerChatJid(sock){
 const privateCommands=new Set(['number','update','system','usage','errors','listsudo','password','remind','truecaller']);
 /** Keep operation targets intact, but keep owner-command output out of contact/group chats. */
 export function ownerCommandContext(ctx,cmd){
+ if(ctx.operator)return ctx; // an operator's owner-command output goes back to their own DM, never to the owner's chat
  if(!cmd.ownerOnly&&cmd.name!=='status')return ctx;
  const to=ownerChatJid(ctx.sock),original=ctx.jid;
  const sock=new Proxy(ctx.sock,{get(target,key){if(key==='sendMessage')return async(jid,body,options)=>{

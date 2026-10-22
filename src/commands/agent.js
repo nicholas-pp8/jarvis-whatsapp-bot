@@ -277,6 +277,7 @@ export async function handlePendingAnswer(ctx, isYes) {
   const p = shell.getPending();
   if (!p) return false;
   if (!shell.isVerifiedOwnerDM(ctx)) return false;
+  if ((p.by || 'owner') !== shell.actorOf(ctx)) return false; // a confirmation only counts from the person who asked for the action
   if (!isYes) {
     shell.clearPending();
     shell.audit('CANCELLED staged actions');
@@ -1058,10 +1059,13 @@ export async function execStep(ctx, step, results) {
       const L = extractNumberedList(ctx.__goal);
       let note = '';
       if (L.clean && MEDIA_INTENT.test(String(ctx.__goal || '')) && L.items.length > step.items.length) { shell.audit('BULK LIST RESTORED planner=' + step.items.length + ' listed=' + L.items.length); step = { ...step, items: L.items.map((x) => x.slice(0, MAX_ARG)) }; note = ' (all ' + L.items.length + ' items you listed)'; }
-      else if (L.markers >= 3 && !L.clean) note = ' WARNING: your message has ' + L.markers + ' numbered markers but the numbering has gaps or repeats, so I used the planner list (' + step.items.length + ' items) - please check it is complete.';
+      else if (L.markers >= 3 && !L.clean) { results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Not queued: your message has ' + L.markers + ' numbered markers but the numbering has gaps, repeats or empty items, so I cannot be sure every item is captured (the planner found ' + step.items.length + '). Nothing was started. Send the list numbered 1,2,3... in order, or one item per line.' }); return; }
       if (step.items.length > MAX_BULK) { results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Not queued: ' + step.items.length + ' items is over the ' + MAX_BULK + ' per request limit. Nothing was started; send it in batches of up to ' + MAX_BULK + '.' }); return; }
-      agentqueue.enqueue(ctx.jid, step.items.map((a) => ({ cmd: step.cmd, args: a })), ctx.__goal || 'bulk download');
-      results.push({ cmd: 'bulk /' + step.cmd + ' x' + step.items.length, code: 0, out: 'Queued ' + step.items.length + ' downloads via /' + step.cmd + note + '. Sending them to this chat one by one, each with retries - watch the separate progress message. Say "/agent retry" later to redo any that fail.' });
+      const n = step.items.length;
+      const qq = agentqueue.enqueue(ctx.jid, step.items.map((a) => ({ cmd: step.cmd, args: a })), ctx.__goal || 'bulk download');
+      const tail = Array.isArray(qq?.items) ? qq.items.slice(-n) : [];
+      if (tail.length !== n || tail.some((x, i) => x.args !== step.items[i])) { results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Queue check FAILED: asked to add ' + n + ' items but the queue file does not show exactly those items at its end. Do not resend; run "/agent status" to see what is queued.' }); return; }
+      results.push({ cmd: 'bulk /' + step.cmd + ' x' + n, code: 0, out: 'Queued ' + n + ' downloads via /' + step.cmd + ' (verified in queue: ' + qq.items.length + ' items total, ' + n + ' added just now)' + note + '. Sending them to this chat one by one, each with retries - watch the separate progress message. Say "/agent retry" later to redo any that fail.' });
     } catch (e) {
       results.push({ cmd: 'bulk /' + step.cmd, code: 1, out: 'Failed to queue: ' + (e?.message || 'error') });
     }
@@ -1915,6 +1919,11 @@ export default {
   description: 'Give Jarvis a goal - it plans and runs a few safe steps itself',
   usage: 'agent <goal, e.g. "weather in Kolkata and top 3 news headlines">',
   async run(ctx) {
+    if (ctx.operator) shell.audit('OPERATOR ' + ctx.operator.slice(-2) + ' /agent ' + ctx.args.join(' ').slice(0, 120));
+    return shell.actorStore.run({ actor: shell.actorOf(ctx) }, () => agentRun(ctx));
+  },
+};
+async function agentRun(ctx) {
     if (!featOn('agent')) return ctx.reply('Agent mode is turned off right now.');
     const rawGoal = ctx.args.join(' ').trim();
     if (rawGoal.length > MAX_GOAL) return ctx.reply('That request is ' + rawGoal.length + ' characters; the limit is ' + MAX_GOAL + ' per message. Nothing was started. Please send it in smaller parts.');
@@ -1990,5 +1999,4 @@ export default {
       return runShellMode(ctx, goal);
     }
     return runSafeMode(ctx, goal);
-  },
-};
+}

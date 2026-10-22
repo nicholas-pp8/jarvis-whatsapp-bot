@@ -1,3 +1,4 @@
+import { operatorIdentity } from '../permissions/operators.js';
 import {resolveSenderIdentity,ownerIdentity} from '../permissions/sender-identity.js';
 import {takeApkChoice} from '../commands/apk/selection.js';
 import config from '../config/config.js';
@@ -170,8 +171,9 @@ const text = extractText(msg.message);
           if (sh.getPending()) {
             const identity = await resolveSenderIdentity(sock, msg, kind);
             const jid2 = msg.key.remoteJid;
-            const gate = { isOwner: ownerIdentity(identity, kind, config.ownerNumber, sock.user?.id || ''), isGroup: jid2.endsWith('@g.us'), jid: jid2, sender: identity.phoneNumber || jidToNumber(identity.senderJid), msg };
-            if (sh.isVerifiedOwnerDM(gate)) {
+            const opNum = operatorIdentity(identity, kind);
+            const gate = { operator: opNum || undefined, isOwner: !!opNum || ownerIdentity(identity, kind, config.ownerNumber, sock.user?.id || ''), isGroup: jid2.endsWith('@g.us'), jid: jid2, sender: identity.phoneNumber || jidToNumber(identity.senderJid), msg };
+            if (sh.isVerifiedOwnerDM(gate) && (sh.getPending().by || 'owner') === sh.actorOf(gate)) {
               if (/^no$/i.test(t)) {
                 sh.clearPending();
                 await sock.sendMessage(jid2, { text: 'Cancelled. Nothing was changed.' }, { quoted: msg });
@@ -222,7 +224,8 @@ const text = extractText(msg.message);
       text,
       args: [],
       isGroup: jid.endsWith('@g.us'),
-      isOwner: ownerIdentity(identity,kind,config.ownerNumber,sock.user?.id || ''),
+      operator: operatorIdentity(identity, kind) || undefined,
+      isOwner: !!operatorIdentity(identity, kind) || ownerIdentity(identity,kind,config.ownerNumber,sock.user?.id || ''),
       commands: registry,
       reply: (content, opts) => sock.sendMessage(jid, { text: content, ...(opts || {}) }, { quoted: msg }),
     };

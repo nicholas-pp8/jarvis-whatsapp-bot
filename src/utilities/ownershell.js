@@ -21,11 +21,16 @@ export function audit(line) {
 
 const num = (j) => String(j || '').split('@')[0].split(':')[0].replace(/\D/g, '');
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+export const actorStore = new AsyncLocalStorage();
+/** Who is acting: 'owner' or the operator's number (set only by the message handler from a verified identity). */
+export const actorOf = (ctx) => (ctx && ctx.operator ? 'op:' + ctx.operator : 'owner');
 export function isVerifiedOwnerDM(ctx) {
   try {
     if (!ctx.isOwner || ctx.isGroup) return false;
     if (ctx.jid.endsWith('@g.us') || ctx.jid.endsWith('@broadcast') || ctx.jid.endsWith('@newsletter')) return false;
-    if (num(ctx.sender) !== String(config.ownerNumber).replace(/\D/g, '')) return false;
+    if (ctx.operator) { if (num(ctx.sender) !== String(ctx.operator)) return false; }
+    else if (num(ctx.sender) !== String(config.ownerNumber).replace(/\D/g, '')) return false;
     const m = ctx.msg?.message || {};
     for (const v of Object.values(m)) {
       const ci = v?.contextInfo;
@@ -69,7 +74,7 @@ let pending = null; // {id, cmds, createdAt}
 export function stage(cmds, extra = {}) {
   // Carry the full pending payload (kind + its data: install, template, msgjob,
   // apicmd, restorecmd, restore, repaircmd) - the confirm handlers need it.
-  pending = { id: crypto.randomBytes(3).toString('hex'), cmds, restarts: 0, note: null, kind: null, ...extra, createdAt: Date.now() };
+  pending = { id: crypto.randomBytes(3).toString('hex'), cmds, restarts: 0, note: null, kind: null, ...extra, by: actorStore.getStore()?.actor || 'owner', createdAt: Date.now() };
   return pending;
 }
 export const getPending = () => (pending && Date.now() - pending.createdAt < 5 * 60e3 ? pending : null);
