@@ -8,6 +8,7 @@ import { initDatabase } from '../src/database/database.js';
 const sent = [];
 const sock = {
   user: { id: '15550001111:1@s.whatsapp.net' },
+  ev: { on() {} },
   sendMessage: async (jid, content) => { sent.push({ jid, content }); return { key: { id: `BOT${sent.length}` } }; },
   readMessages: async () => {},
 };
@@ -16,13 +17,13 @@ const mk = (text, extra = {}) => ({ key: { remoteJid: '919999999999@s.whatsapp.n
 test('command flow with a mocked socket', async () => {
   await ensureDirs(); await initDatabase(); await loadCommands(); trackOutgoing(sock);
   await handleMessage(sock, mk('/menu'));
-  assert.match(sent.at(-1).content.text, /ᴘʟᴀʏ[\s\S]*ᴠɪᴅᴇᴏ[\s\S]*ꜱᴛᴀᴛᴜꜱ/);
+  assert.match(sent.at(-1).content.text, /Jarvis Menu[\s\S]*Quick start[\s\S]*\/play <song>[\s\S]*START HERE[\s\S]*1\. General[\s\S]*Downloaders/);
   await handleMessage(sock, { ...mk('/play'), key: { remoteJid: '911111111111@s.whatsapp.net', id: 'x0' } });
   assert.match(sent.at(-1).content.text, /Missing input/);
   await handleMessage(sock, { ...mk('/ytaudio'), key: { remoteJid: '918888888888@s.whatsapp.net', id: 'x1' } });
   assert.match(sent.at(-1).content.text, /Missing input/); // hidden alias still resolves
   await handleMessage(sock, { ...mk('/video https://www.pinterest.com/pin/123456/'), key: { remoteJid: '917777777777@s.whatsapp.net', id: 'x2' } });
-  assert.match(sent.at(-1).content.text, /download failed.*Reference: [a-f0-9]{10}/);
+  assert.match(sent.at(-1).content.text, /not a youtube link/i); // /video is YouTube-only; other sites have their own commands
   await handleMessage(sock, { ...mk('/nope'), key: { remoteJid: '916666666666@s.whatsapp.net', id: 'x3' } });
   assert.match(sent.at(-1).content.text, /Unknown command/);
   const n = sent.length;

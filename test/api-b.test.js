@@ -53,14 +53,14 @@ test('webhooks API: admin only, secret shown once, list hides secret, delete wor
 test('dispatcher signs with HMAC, retries on failure, gives up, skips non-subscribed events', async () => {
   const w = await hooks.create({url: 'https://hooks.example.com/in', events: ['connection.changed']}, publicLookup);
   const calls = []; let fail = 1;
-  const fetchFn = async (url, o) => { calls.push({url, o}); if (fail-- > 0) return {status: 500}; return {status: 204}; };
-  const d = new hooks.Dispatcher({fetchFn, delays: [10, 10], lookup: publicLookup, now: () => 1700000000000});
+  const requestFn = async (url, o) => { calls.push({url, o}); if (fail-- > 0) return {status: 500}; return {status: 204}; };
+  const d = new hooks.Dispatcher({requestFn, delays: [10, 10], lookup: publicLookup, now: () => 1700000000000});
   d.dispatch({type: 'bot.restart', at: 1, data: {}}); await new Promise((r) => setTimeout(r, 30)); assert.equal(calls.length, 0);
   d.dispatch({type: 'connection.changed', at: 1, data: {status: 'online'}}); await new Promise((r) => setTimeout(r, 80));
   assert.equal(calls.length, 2); const h = calls[1].o.headers;
-  assert.equal(h['x-jarvis-signature'], hooks.sign(w.secret, h['x-jarvis-timestamp'], calls[1].o.body)); assert.equal(calls[1].o.redirect, 'manual');
+  assert.equal(h['x-jarvis-signature'], hooks.sign(w.secret, h['x-jarvis-timestamp'], calls[1].o.body)); assert.equal(calls[1].o.follow, false); assert.equal(calls[1].o.method, 'POST');
   assert.ok(!calls[1].o.body.includes(w.secret));
-  const always = []; const d2 = new hooks.Dispatcher({fetchFn: async () => { always.push(1); return {status: 500}; }, delays: [5, 5], lookup: publicLookup});
+  const always = []; const d2 = new hooks.Dispatcher({requestFn: async () => { always.push(1); return {status: 500}; }, delays: [5, 5], lookup: publicLookup});
   d2.dispatch({type: 'connection.changed', at: 1, data: {}}); await new Promise((r) => setTimeout(r, 80)); assert.equal(always.length, 3); d.stop(); d2.stop();
   assert.ok(hooks.remove(w.id)); assert.equal(hooks.remove(w.id), false);
 });
