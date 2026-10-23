@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import QRCode from 'qrcode';
+import { renderHeartQr } from './heartQr.js';
 
 // WhatsApp re-issues the login QR roughly every 20s while unpaired; only the
 // latest one is usable, so each event atomically replaces the saved image.
@@ -25,7 +26,10 @@ export async function savePairingQr(qr, dataDir, log = () => {}) {
   if (!pairingQrEnabled()) return { ok: false, why: 'disabled' };
   const { png, meta } = pairingQrPaths(dataDir);
   await fs.mkdir(dataDir, { recursive: true });
-  const buf = await QRCode.toBuffer(qr, { type: 'png', width: 512, margin: 2, errorCorrectionLevel: 'M' });
+  let buf;
+  if (String(process.env.PAIRING_QR_STYLE || 'heart').trim().toLowerCase() === 'plain') buf = null;
+  else { try { buf = await renderHeartQr(qr, 768); } catch { buf = null; } } // any render problem falls back to the plain QR
+  if (!buf) buf = await QRCode.toBuffer(qr, { type: 'png', width: 512, margin: 2, errorCorrectionLevel: 'M' });
   refreshCount += 1;
   const generatedAt = new Date().toISOString();
   const tmp = png + '.tmp';
