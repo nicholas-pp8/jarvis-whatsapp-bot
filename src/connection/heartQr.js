@@ -7,12 +7,12 @@ import sharp from 'sharp';
 
 const HEART = 'M0,-0.62 C-0.05,-0.95 -0.62,-1.02 -0.92,-0.62 C-1.2,-0.2 -0.85,0.25 0,1 C0.85,0.25 1.2,-0.2 0.92,-0.62 C0.62,-1.02 0.05,-0.95 0,-0.62 Z';
 
-export async function renderHeartQr(qr, size = 768) {
+export async function renderHeartQr(qr, size = 1024) {
   const q = QRCode.create(qr, { errorCorrectionLevel: 'H' });
   const n = q.modules.size;
   const data = q.modules.data;
   const quiet = 4;
-  const panel = Math.floor(size * 0.66 / (n + quiet * 2)) * (n + quiet * 2);
+  const panel = Math.floor(size * 0.8 / (n + quiet * 2)) * (n + quiet * 2);
   const cell = panel / (n + quiet * 2);
   const px = (size - panel) / 2;
   const py = size * 0.5 - panel / 2 + size * 0.02;
@@ -29,7 +29,7 @@ export async function renderHeartQr(qr, size = 768) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
 <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7aa8"/><stop offset="1" stop-color="#e0245e"/></linearGradient></defs>
 <rect width="${size}" height="${size}" fill="#fff0f5"/>
-<g transform="translate(${size / 2} ${size * 0.47}) scale(${size * 0.48})"><path d="${HEART}" fill="url(#g)"/></g>
+<g transform="translate(${size / 2} ${size * 0.47}) scale(${size * 0.5})"><path d="${HEART}" fill="url(#g)"/></g>
 <rect x="${px}" y="${py}" width="${panel}" height="${panel}" rx="${cell * 2}" fill="#ffffff"/>
 <g fill="${ink}" shape-rendering="crispEdges">${rects}</g>
 <g transform="translate(${cx} ${cy}) scale(${hs})"><rect x="-1.35" y="-1.25" width="2.7" height="2.55" rx="0.5" fill="#fff"/><path d="${HEART}" fill="#e0245e"/></g>

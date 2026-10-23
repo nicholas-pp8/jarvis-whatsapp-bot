@@ -28,7 +28,7 @@ export async function savePairingQr(qr, dataDir, log = () => {}) {
   await fs.mkdir(dataDir, { recursive: true });
   let buf;
   if (String(process.env.PAIRING_QR_STYLE || 'heart').trim().toLowerCase() === 'plain') buf = null;
-  else { try { buf = await renderHeartQr(qr, 768); } catch { buf = null; } } // any render problem falls back to the plain QR
+  else { try { buf = await renderHeartQr(qr, 1024); } catch { buf = null; } } // any render problem falls back to the plain QR
   if (!buf) buf = await QRCode.toBuffer(qr, { type: 'png', width: 512, margin: 2, errorCorrectionLevel: 'M' });
   refreshCount += 1;
   const generatedAt = new Date().toISOString();
