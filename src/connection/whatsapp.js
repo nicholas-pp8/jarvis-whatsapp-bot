@@ -23,6 +23,7 @@ import { observe, onRevokeKey } from '../recover/index.js';
 import { getSettings as recoverSettings, get as recoverGet } from '../recover/store.js';
 import { detectEnv } from '../telemetry/env.js';
 import { bridge, cleanCode, createHeartbeat, claimSession, createStatusBeat, createPairing, createProofRelay, loadSaved, loadTicket, redeemCode } from '../ecosystem/pairing.js';
+import { savePairingQr, clearPairingQr } from './pairingQr.js';
 
 const MAX_PAIRING_ATTEMPTS = 3;
 const MAX_MESSAGE_AGE_S = 120;
@@ -58,6 +59,7 @@ async function requestPairing(s) {
     pairingAttempts++;
     if (pairingAttempts > MAX_PAIRING_ATTEMPTS) {
       logger.error('Pairing was not completed after several attempts. Stopping to avoid WhatsApp rate limits. Start the bot again when ready.');
+      clearPairingQr(config.paths.data).catch(() => {});
       return shutdown(1);
     }
     const code = await s.requestPairingCode(pairingNumber);
@@ -235,11 +237,15 @@ export async function startWhatsApp() {
     try {
       const { connection: connectionState, lastDisconnect, qr } = update;
 
-      // A QR event means the socket is ready and not logged in: ask for a pairing code instead.
-      if (qr && !s.authState.creds.registered && !pairingRequested) {
-        pairingRequested = true;
-        await sleep(1500);
-        await requestPairing(s);
+      // A QR event means the socket is ready and not logged in. Save the scannable QR image
+      // (WhatsApp refreshes it about every 20s) and also request a phone pairing code as fallback.
+      if (qr && !s.authState.creds.registered) {
+        savePairingQr(qr, config.paths.data, (m) => logger.warn(m)).catch((e) => logger.warn('Pairing QR save failed: ' + (e?.message || e)));
+        if (!pairingRequested) {
+          pairingRequested = true;
+          await sleep(1500);
+          await requestPairing(s);
+        }
       }
 
       if (connectionState === 'connecting') logger.info('Connecting to WhatsApp…');
@@ -254,6 +260,7 @@ export async function startWhatsApp() {
         reconnectAttempts = 0;
         pairingAttempts = 0;
         logger.info('WhatsApp connection established');
+        clearPairingQr(config.paths.data).catch(() => {});
         try {
           const { onConnected } = await import('../utilities/updateguard.js');
           const { registry: reg2, commandLoadFailures: clf2 } = await import('../handlers/commandHandler.js');
